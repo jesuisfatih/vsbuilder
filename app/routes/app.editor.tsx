@@ -211,6 +211,37 @@ export default function Editor() {
   const shopifyBridge = useAppBridge();
   const store = useEditorStore();
 
+  // Enter fullscreen mode when editor mounts
+  useEffect(() => {
+    // Shopify App Bridge Fullscreen API
+    // This makes the app take over the entire screen like Theme Customizer
+    if (shopifyBridge) {
+      try {
+        // @ts-ignore - Fullscreen API
+        shopifyBridge.dispatch({
+          type: 'APP::FULLSCREEN::OPEN',
+        });
+      } catch (e) {
+        console.log('[Editor] Fullscreen dispatch error:', e);
+      }
+    }
+
+    // Cleanup: exit fullscreen when leaving the editor
+    return () => {
+      if (shopifyBridge) {
+        try {
+          // @ts-ignore
+          shopifyBridge.dispatch({
+            type: 'APP::FULLSCREEN::CLOSE',
+          });
+        } catch (e) {
+          console.log('[Editor] Fullscreen close error:', e);
+        }
+      }
+    };
+  }, [shopifyBridge]);
+
+  // Initialize store with theme data
   useEffect(() => {
     store.setTemplate(initialData.template);
     store.setHeaderGroup(initialData.header);
