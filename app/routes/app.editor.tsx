@@ -28,27 +28,67 @@ import { getActiveThemeId, getThemeAsset } from "../utils/theme.server";
  * Million Dollar Engine: Fetches the ACTUAL JSON structure from Shopify.
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  try {
+    const { admin, session } = await authenticate.admin(request);
 
-  const themeId = await getActiveThemeId(admin);
-  if (!themeId) return json({ error: "No active theme found" }, { status: 404 });
-
-  // Get current store state from real theme files
-  const [indexTemplate, headerGroup, footerGroup] = await Promise.all([
-    getThemeAsset(admin, themeId.toString(), "templates/index.json"),
-    getThemeAsset(admin, themeId.toString(), "config/header-group.json").catch(() => null),
-    getThemeAsset(admin, themeId.toString(), "config/footer-group.json").catch(() => null),
-  ]);
-
-  return json({
-    shop: session.shop,
-    themeId,
-    initialData: {
-      template: indexTemplate || { sections: {}, order: [] },
-      header: headerGroup || { sections: {}, order: [] },
-      footer: footerGroup || { sections: {}, order: [] }
+    // Check if admin and rest resources are available
+    if (!admin?.rest?.resources) {
+      console.error("[Editor] Admin REST resources not available");
+      return json({
+        shop: session?.shop || "demo-shop",
+        themeId: null,
+        initialData: {
+          template: { sections: {}, order: [] },
+          header: { sections: {}, order: [] },
+          footer: { sections: {}, order: [] }
+        },
+        error: "Session not fully initialized. Please refresh the page."
+      });
     }
-  });
+
+    const themeId = await getActiveThemeId(admin);
+    if (!themeId) {
+      return json({
+        shop: session.shop,
+        themeId: null,
+        initialData: {
+          template: { sections: {}, order: [] },
+          header: { sections: {}, order: [] },
+          footer: { sections: {}, order: [] }
+        },
+        error: "No active theme found"
+      });
+    }
+
+    // Get current store state from real theme files
+    const [indexTemplate, headerGroup, footerGroup] = await Promise.all([
+      getThemeAsset(admin, themeId.toString(), "templates/index.json"),
+      getThemeAsset(admin, themeId.toString(), "config/header-group.json").catch(() => null),
+      getThemeAsset(admin, themeId.toString(), "config/footer-group.json").catch(() => null),
+    ]);
+
+    return json({
+      shop: session.shop,
+      themeId,
+      initialData: {
+        template: indexTemplate || { sections: {}, order: [] },
+        header: headerGroup || { sections: {}, order: [] },
+        footer: footerGroup || { sections: {}, order: [] }
+      }
+    });
+  } catch (error) {
+    console.error("[Editor] Loader error:", error);
+    return json({
+      shop: "demo-shop",
+      themeId: null,
+      initialData: {
+        template: { sections: {}, order: [] },
+        header: { sections: {}, order: [] },
+        footer: { sections: {}, order: [] }
+      },
+      error: "Failed to load editor. Please try again."
+    });
+  }
 };
 
 /**

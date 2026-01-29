@@ -10,7 +10,7 @@ export default function Index() {
       <Layout>
         <Layout.Section>
           <Banner title="System Ready" tone="success">
-            <p>Your Shopify App (2026-04 API) is connected and secure headers are active.</p>
+            <p>Your Shopify App (2025-01 API) is connected and secure headers are active.</p>
           </Banner>
         </Layout.Section>
 
