@@ -1,373 +1,319 @@
-import {
-    closestCenter,
-    DndContext
-} from "@dnd-kit/core";
-import {
-    SortableContext,
-    useSortable,
-    verticalListSortingStrategy
-} from "@dnd-kit/sortable";
+import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-    ArrowUturnLeftIcon,
-    ArrowUturnRightIcon,
-    Bars2Icon,
-    ChevronDownIcon,
-    ComputerDesktopIcon,
-    DevicePhoneMobileIcon,
-    EllipsisHorizontalIcon,
-    EyeIcon,
-    EyeSlashIcon,
-    PlusIcon,
-    TrashIcon
+  ArrowUturnLeftIcon,
+  ArrowUturnRightIcon,
+  Bars2Icon,
+  ChevronDownIcon,
+  ComputerDesktopIcon,
+  DevicePhoneMobileIcon,
+  EllipsisHorizontalIcon,
+  EyeIcon,
+  PlusIcon,
+  RectangleGroupIcon,
+  Square3Stack3DIcon
 } from "@heroicons/react/24/outline";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAppBridge } from "@shopify/app-bridge-react";
-import { Fullscreen } from "@shopify/app-bridge/actions";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useMemo } from "react";
 import { authenticate } from "../shopify.server";
-
-/**
- * TYPES
- */
-interface EditorBlock {
-  id: string;
-  type: string;
-  name: string;
-  isVisible: boolean;
-}
-
-interface EditorSection {
-  id: string;
-  type: string;
-  name: string;
-  isVisible: boolean;
-  blocks: EditorBlock[];
-}
-
-interface PageData {
-  header: EditorSection[];
-  template: EditorSection[];
-  footer: EditorSection[];
-}
+import { useEditorStore } from "../store/useEditorStore";
+import { getActiveThemeId, getThemeAsset } from "../utils/theme.server";
 
 /**
  * LOADER
+ * Million Dollar Engine: Fetches the ACTUAL JSON structure from Shopify.
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
 
-  // Real implementasyon Shopify Theme Settings JSON'dan beslenecek
-  const initialData: PageData = {
-    header: [
-      { id: "h1", name: "Announcement bar", type: "header-block", isVisible: true, blocks: [] },
-      { id: "h2", name: "Header", type: "header-main", isVisible: true, blocks: [] },
-    ],
-    template: [
-      { id: "s1", name: "HYDRO Floating Widgets", type: "hydro-widgets", isVisible: true, blocks: [] },
-      { id: "s2", name: "HYDRO Glass Cards", type: "hydro-cards", isVisible: true, blocks: [] },
-      { id: "s3", name: "HYDRO Premium Stats", type: "hydro-stats", isVisible: true, blocks: [] },
-    ],
-    footer: [
-      { id: "f1", name: "Footer", type: "footer", isVisible: true, blocks: [] },
-    ]
-  };
+  const themeId = await getActiveThemeId(admin);
+  if (!themeId) return json({ error: "No active theme found" }, { status: 404 });
 
-  return json({ initialData });
+  // Get current store state from real theme files
+  const [indexTemplate, headerGroup, footerGroup] = await Promise.all([
+    getThemeAsset(admin, themeId.toString(), "templates/index.json"),
+    getThemeAsset(admin, themeId.toString(), "config/header-group.json").catch(() => null),
+    getThemeAsset(admin, themeId.toString(), "config/footer-group.json").catch(() => null),
+  ]);
+
+  return json({
+    shop: session.shop,
+    themeId,
+    initialData: {
+      template: indexTemplate || { sections: {}, order: [] },
+      header: headerGroup || { sections: {}, order: [] },
+      footer: footerGroup || { sections: {}, order: [] }
+    }
+  });
 };
 
 /**
- * COMPONENTS
+ * TREE NODE COMPONENT
  */
+const SectionNode = ({ id, section, isActive, onClick, depth = 0 }: any) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
-const SidebarItem = ({
-  item,
-  active,
-  onClick,
-  isChild = false
-}: {
-  item: EditorSection | EditorBlock,
-  active: boolean,
-  onClick: () => void,
-  isChild?: boolean
-}) => {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id });
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    paddingLeft: `${depth * 12 + 16}px`,
+  };
 
   return (
-    <div
+    <motion.div
       ref={setNodeRef}
       style={style}
+      layout
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
       className={clsx(
-        "group flex items-center justify-between py-2 px-3 rounded-md cursor-default transition-all duration-200 select-none",
-        active ? "bg-[#e2e8f0] text-black shadow-sm" : "hover:bg-[#f1f5f9] text-[#4a5568]",
-        isChild && "ml-4"
+        "group flex items-center justify-between py-2.5 pr-3 my-0.5 rounded-lg cursor-default select-none border transition-all duration-200",
+        isActive
+          ? "bg-[#DAEFFF] border-[#AED6F1] text-[#0060A9] shadow-sm"
+          : "bg-white border-transparent hover:bg-[#F3F4F6] text-[#202223]",
+        isDragging && "opacity-40 scale-95"
       )}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onClick={onClick}
     >
-      <div className="flex items-center gap-3">
-        <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity">
-          <Bars2Icon className="w-4 h-4 text-gray-400" />
+      <div className="flex items-center gap-3 min-w-0">
+        <div {...attributes} {...listeners} className="p-1 hover:bg-black/5 rounded cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity">
+          <Bars2Icon className="w-4 h-4 text-[#8C9196]" />
         </div>
-        <span className="text-[13px] font-medium leading-none truncate max-w-[160px]">
-          {item.name}
-        </span>
+
+        <div className="flex items-center gap-2 truncate text-[13px] font-medium">
+          {depth === 0 ? (
+            <RectangleGroupIcon className={clsx("w-4 h-4 shrink-0", isActive ? "text-[#0060A9]" : "text-[#5C5F62]")} />
+          ) : (
+            <div className="w-1.5 h-1.5 rounded-full bg-gray-300 mx-1" />
+          )}
+          <span className="truncate">{section?.type?.replace("-", " ") || "New Section"}</span>
+        </div>
       </div>
-      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button className="p-1 hover:bg-white rounded transition-colors">
-          {item.isVisible ? <EyeIcon className="w-3.5 h-3.5" /> : <EyeSlashIcon className="w-3.5 h-3.5 text-red-500" />}
+
+      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+         <button className="p-1.5 hover:bg-white rounded text-[#5C5F62]">
+           <EyeIcon className="w-4 h-4" />
+         </button>
+      </div>
+    </motion.div>
+  );
+};
+
+/**
+ * DYNAMIC PROPERTY INSPECTOR
+ * The "Brain" that renders Shopify's Schema fields.
+ */
+const Inspector = ({ id, section }: any) => {
+  if (!section) return (
+    <div className="flex flex-col items-center justify-center h-full text-center p-12 space-y-4">
+      <div className="w-20 h-20 bg-gray-50 rounded-3xl flex items-center justify-center animate-pulse">
+        <Square3Stack3DIcon className="w-10 h-10 text-gray-200" />
+      </div>
+      <p className="text-sm font-medium text-gray-400">Select an element to edit</p>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <header className="h-14 flex items-center justify-between px-6 border-b border-gray-100 shrink-0">
+        <h3 className="text-[14px] font-bold text-gray-900 capitalize italic">{section.type.replace("-", " ")}</h3>
+        <button className="p-2 hover:bg-gray-100 rounded-lg text-gray-400"><EllipsisHorizontalIcon className="w-5 h-5" /></button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-10">
+        {/* Dynamic Settings Renderer */}
+        {Object.entries(section.settings || {}).map(([key, value]) => (
+          <div key={key} className="space-y-3">
+            <div className="flex items-center justify-between">
+               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.05em]">{key.replace(/_/g, " ")}</label>
+               <span className="text-[9px] font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-500 uppercase">{typeof value}</span>
+            </div>
+
+            {typeof value === 'boolean' ? (
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <div className="relative inline-flex items-center">
+                  <input type="checkbox" className="sr-only peer" defaultChecked={value} />
+                  <div className="w-10 h-6 bg-gray-100 rounded-full peer peer-checked:bg-[#008060] after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full shadow-inner ring-1 ring-gray-200"></div>
+                </div>
+                <span className="text-sm font-medium text-gray-600">Enabled</span>
+              </label>
+            ) : typeof value === 'number' ? (
+              <div className="space-y-4">
+                 <input type="range" className="w-full h-1.5 bg-gray-100 rounded-lg appearance-none cursor-pointer accent-[#2c6ecb]" defaultValue={value} />
+                 <div className="flex justify-between text-[10px] font-bold text-gray-400"><span>0</span><span>{value}</span><span>100</span></div>
+              </div>
+            ) : (
+              <input
+                type="text"
+                defaultValue={value as string}
+                className="w-full h-10 px-4 text-sm bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-[#2383DA]/20 focus:border-[#2383DA] transition-all shadow-sm"
+              />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="p-6 border-t border-gray-50 bg-[#F9FAFB] flex flex-col gap-3">
+        <button className="w-full py-3 text-sm font-bold text-red-500 hover:bg-red-50 rounded-xl transition-all border border-transparent hover:border-red-100 shadow-sm">
+           Remove Section
         </button>
       </div>
     </div>
   );
 };
 
-const SidebarGroup = ({
-  title,
-  items,
-  activeId,
-  onSelect
-}: {
-  title: string,
-  items: EditorSection[],
-  activeId: string | null,
-  onSelect: (id: string) => void
-}) => {
-  const [isOpen, setIsOpen] = useState(true);
-
-  return (
-    <div className="mb-6">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-3 mb-2 group"
-      >
-        <span className="text-[11px] font-bold text-[#64748b] uppercase tracking-wider">{title}</span>
-        <ChevronDownIcon className={clsx("w-3 h-3 text-gray-400 transition-transform", !isOpen && "-rotate-90")} />
-      </button>
-
-      {isOpen && (
-        <div className="space-y-0.5 px-1">
-          <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
-            {items.map((item) => (
-              <div key={item.id}>
-                <SidebarItem
-                  item={item}
-                  active={activeId === item.id}
-                  onClick={() => onSelect(item.id)}
-                />
-                {item.blocks && item.blocks.map(block => (
-                   <SidebarItem
-                    key={block.id}
-                    item={block}
-                    active={activeId === block.id}
-                    onClick={() => onSelect(block.id)}
-                    isChild
-                  />
-                ))}
-              </div>
-            ))}
-          </SortableContext>
-          <button className="w-full flex items-center gap-2 px-4 py-2 mt-1 text-[12px] font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
-            <PlusIcon className="w-3.5 h-3.5" /> Add section
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
-/**
- * EDITOR MAIN
- */
 export default function Editor() {
-  const { initialData } = useLoaderData<typeof loader>();
-  const shopify = useAppBridge();
+  const { initialData, shop } = useLoaderData<typeof loader>();
+  const shopifyBridge = useAppBridge();
+  const store = useEditorStore();
 
-  const [pageData, setPageData] = useState<PageData>(initialData);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
-  const [isChanged, setIsChanged] = useState(false);
-
-  // Fullscreen Entry
   useEffect(() => {
-    const fullscreen = Fullscreen.create(shopify);
-    fullscreen.dispatch(Fullscreen.Action.ENTER);
-    return () => { fullscreen.dispatch(Fullscreen.Action.EXIT); };
-  }, [shopify]);
+    store.setTemplate(initialData.template);
+    store.setHeaderGroup(initialData.header);
+    store.setFooterGroup(initialData.footer);
+  }, []);
 
-  const selectedItem = [...pageData.header, ...pageData.template, ...pageData.footer].find(i => i.id === selectedId);
+  const activeSection = useMemo(() => {
+    if (!store.selectedId) return null;
+    return store.template.sections[store.selectedId] ||
+           store.headerGroup.sections[store.selectedId] ||
+           store.footerGroup.sections[store.selectedId];
+  }, [store.selectedId, store.template, store.headerGroup, store.footerGroup]);
 
   return (
-    <div className="h-screen flex flex-col bg-[#f6f6f7] text-[#1a1c1e] antialiased overflow-hidden font-inter select-none">
+    <div className="h-screen w-full flex flex-col bg-[#F3F4F6] text-[#202223] overflow-hidden font-sans select-none">
 
-      {/* HEADER / NAVIGATION BAR */}
-      <nav className="h-[52px] bg-white border-b border-[#d1d5db] flex items-center justify-between px-4 z-[100] relative">
-        <div className="flex items-center gap-4 flex-1">
-          <div className="flex items-center gap-2 pr-4 border-r border-gray-200">
-             <div className="w-8 h-8 flex items-center justify-center bg-black text-white rounded-lg font-black text-lg">V</div>
-             <div className="flex flex-col leading-tight">
-                <span className="text-[14px] font-semibold text-gray-900 leading-none">VSBuilder</span>
-                <span className="text-[10px] text-gray-500 font-medium">techify-BEHYDRO-v5-Theme</span>
+      {/* MEGA TOP BAR */}
+      <nav className="h-[56px] bg-white border-b border-gray-200 flex items-center justify-between px-6 z-[100] shadow-sm relative shrink-0">
+        <div className="flex items-center gap-5 min-w-0">
+          <div className="flex items-center gap-3 pr-5 border-r border-gray-100 tracking-tight">
+             <div className="w-9 h-9 flex items-center justify-center bg-gray-900 text-white rounded-xl font-bold text-[18px] shadow-lg">V</div>
+             <div className="flex flex-col">
+                <span className="text-[14px] font-bold leading-tight">VSBuilder</span>
+                <span className="text-[10px] text-blue-500 font-bold uppercase tracking-widest">{shop.split('.')[0]}</span>
              </div>
           </div>
 
-          {/* PAGE SELECTOR */}
-          <button className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-100 rounded-md transition-colors">
-             <span className="text-[13px] font-medium">Home page</span>
-             <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400" />
+          <button className="flex items-center gap-2 px-4 py-1.5 hover:bg-gray-50 rounded-xl transition-all border border-transparent hover:border-gray-200 group">
+             <span className="text-[13px] font-bold text-gray-700">Home page</span>
+             <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400 group-hover:text-gray-900" />
           </button>
         </div>
 
-        {/* VIEWPORT CONTROLS */}
-        <div className="flex items-center gap-1 bg-[#f1f5f9] p-1 rounded-lg">
+        {/* DEVICE TOGGLE */}
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center bg-[#F3F4F6] p-1.5 rounded-2xl border border-gray-100 shadow-inner">
            <button
-             onClick={() => setDevice("desktop")}
-             className={clsx("p-1.5 rounded-md", device === "desktop" ? "bg-white shadow-sm text-black" : "text-gray-400 hover:text-gray-600")}
+             onClick={() => store.setDevice("desktop")}
+             className={clsx("p-2 rounded-xl transition-all duration-300", store.device === "desktop" ? "bg-white shadow-lg text-blue-600 scale-105" : "text-gray-400 hover:text-gray-600")}
            >
-             <ComputerDesktopIcon className="w-4 h-4" />
+             <ComputerDesktopIcon className="w-5 h-5" />
            </button>
            <button
-             onClick={() => setDevice("mobile")}
-             className={clsx("p-1.5 rounded-md", device === "mobile" ? "bg-white shadow-sm text-black" : "text-gray-400 hover:text-gray-600")}
+             onClick={() => store.setDevice("mobile")}
+             className={clsx("p-2 rounded-xl transition-all duration-300", store.device === "mobile" ? "bg-white shadow-lg text-blue-600 scale-105" : "text-gray-400 hover:text-gray-600")}
            >
-             <DevicePhoneMobileIcon className="w-4 h-4" />
+             <DevicePhoneMobileIcon className="w-5 h-5" />
            </button>
         </div>
 
-        <div className="flex items-center justify-end gap-3 flex-1">
-           <div className="flex items-center gap-1.5 mr-4 text-gray-400">
-             <button className="p-1.5 hover:text-gray-600 disabled:opacity-30"><ArrowUturnLeftIcon className="w-4 h-4" /></button>
-             <button className="p-1.5 hover:text-gray-600 disabled:opacity-30"><ArrowUturnRightIcon className="w-4 h-4" /></button>
+        <div className="flex items-center gap-4">
+           <div className="flex items-center gap-1.5 mr-2">
+              <button className="p-2 hover:bg-gray-50 rounded-lg text-gray-300" disabled><ArrowUturnLeftIcon className="w-5 h-5" /></button>
+              <button className="p-2 hover:bg-gray-50 rounded-lg text-gray-300" disabled><ArrowUturnRightIcon className="w-5 h-5" /></button>
            </div>
-           <button className="px-3 py-1.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-100 rounded-md">Publish</button>
-           <button className={clsx(
-             "px-5 py-1.5 text-[13px] font-bold rounded-md transition-all shadow-lg shadow-black/10 active:scale-[0.98]",
-             isChanged ? "bg-[#008060] text-white hover:bg-[#006e52]" : "bg-white border border-[#d1d5db] text-gray-400 cursor-not-allowed"
-           )}>
-             Save
+
+           <button className="px-5 py-2 text-[13px] font-bold text-gray-600 hover:bg-gray-100 rounded-xl transition-colors">Publish</button>
+           <button className="px-8 py-2.5 bg-gray-900 text-white text-[13px] font-black rounded-xl hover:bg-black shadow-[0_4px_20px_rgba(0,0,0,0.1)] transition-all active:scale-95 ring-4 ring-black/5">
+             Save Changes
            </button>
         </div>
       </nav>
 
-      {/* MAIN CONTAINER */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
 
-        {/* LEFT SIDEBAR: THE TREE */}
-        <aside className="w-[280px] bg-white border-r border-[#d1d5db] flex flex-col shrink-0">
-          <div className="flex-1 overflow-y-auto px-2 pt-4 custom-scrollbar">
-             <DndContext collisionDetection={closestCenter}>
-               <SidebarGroup
-                 title="Header"
-                 items={pageData.header}
-                 activeId={selectedId}
-                 onSelect={setSelectedId}
-               />
-               <SidebarGroup
-                 title="Template"
-                 items={pageData.template}
-                 activeId={selectedId}
-                 onSelect={setSelectedId}
-               />
-               <SidebarGroup
-                 title="Footer"
-                 items={pageData.footer}
-                 activeId={selectedId}
-                 onSelect={setSelectedId}
-               />
-             </DndContext>
+        {/* SIDEBAR: RECURSIVE JSON ENGINE */}
+        <aside className="w-[310px] bg-white border-r border-gray-200 flex flex-col z-[40] shrink-0 shadow-xl shadow-black/5">
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pt-6 space-y-10">
+
+             {/* Dynamic Groups Mapping */}
+             {[
+               { id: 'header', label: 'Header', data: store.headerGroup },
+               { id: 'template', label: 'Template', data: store.template },
+               { id: 'footer', label: 'Footer', data: store.footerGroup }
+             ].map(group => (
+               <section key={group.id}>
+                 <div className="flex items-center justify-between px-4 mb-4">
+                    <span className="text-[11px] font-black text-gray-400 uppercase tracking-[.15em]">{group.label}</span>
+                    <PlusIcon className="w-4 h-4 text-gray-300 cursor-pointer hover:text-blue-500 transition-colors" />
+                 </div>
+
+                 <div className="space-y-1">
+                   {group.data?.order?.map((id: string) => (
+                      <SectionNode
+                        key={id}
+                        id={id}
+                        section={group.data.sections[id]}
+                        isActive={store.selectedId === id}
+                        onClick={() => store.selectNode(id)}
+                      />
+                   ))}
+                   {group.id === 'template' && (
+                     <button className="w-full mt-4 py-4 border-2 border-dashed border-gray-100 rounded-2xl text-[12px] font-black text-blue-500 bg-blue-50/20 hover:bg-blue-50 transition-all">
+                       + ADD SECTION
+                     </button>
+                   )}
+                 </div>
+               </section>
+             ))}
+
           </div>
         </aside>
 
-        {/* CENTER: LIVE PREVIEW */}
-        <main className="flex-1 bg-[#e4e5e7] relative flex items-center justify-center p-4">
-           {/* Device Frame */}
-           <div className={clsx(
-              "bg-white shadow-[0_40px_100px_rgba(0,0,0,0.15)] ring-1 ring-black/5 relative transition-all duration-500 ease-[cubic-bezier(0.25,0.8,0.25,1)]",
-              device === "mobile"
-                ? "w-[375px] h-full max-h-[780px] rounded-[48px] border-[12px] border-[#1e293b]"
-                : "w-full h-full rounded-lg"
-           )}>
-              {/* Device Notch for mobile */}
-              {device === "mobile" && (
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-[#1e293b] rounded-b-2xl z-20 flex items-center justify-center">
-                   <div className="w-10 h-1 bg-gray-800 rounded-full"></div>
-                </div>
-              )}
+        {/* WORKSPACE: THE INFINITE CANVAS */}
+        <main className="flex-1 bg-[#F9FAFB] relative flex items-center justify-center p-8 overflow-hidden">
+           {/* Engineering Grid */}
+           <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: `radial-gradient(#000 1px, transparent 1px)`, backgroundSize: '30px 30px' }} />
 
+           <motion.div
+              layout
+              transition={{ type: "spring", stiffness: 200, damping: 25 }}
+              className={clsx(
+                "bg-white shadow-[0_100px_100px_-50px_rgba(0,0,0,0.15)] ring-1 ring-black/5 relative overflow-hidden",
+                store.device === "mobile"
+                  ? "w-[390px] h-full rounded-[60px] border-[14px] border-gray-900"
+                  : "w-full h-full rounded-[20px]"
+              )}
+           >
               <iframe
                 src="/"
-                className="w-full h-full rounded-none"
-                style={{ borderRadius: device === "mobile" ? "36px" : "4px" }}
+                className="w-full h-full pointer-events-none"
+                style={{ filter: "brightness(0.98)" }}
               />
-           </div>
+
+              {/* Overlay to catch interactions when dragging */}
+              {/* <div className="absolute inset-0 z-20" /> */}
+           </motion.div>
         </main>
 
-        {/* RIGHT SIDEBAR: INSPECTOR */}
-        <aside className="w-[320px] bg-white border-l border-[#d1d5db] flex flex-col shrink-0">
-          {selectedItem ? (
-            <>
-              <div className="h-14 flex items-center justify-between px-5 border-b border-gray-100 flex-none bg-[#f8fafc]">
-                <h3 className="text-[14px] font-bold text-gray-900">{selectedItem.name}</h3>
-                <button className="p-1.5 hover:bg-gray-200 rounded text-gray-400"><EllipsisHorizontalIcon className="w-5 h-5" /></button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-5 space-y-8 scrollbar-hide">
-
-                {/* DYNAMIC SETTINGS SIMULATION */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[12px] font-semibold text-gray-500 uppercase tracking-tighter">Visibility</span>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" defaultChecked />
-                      <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#008060]"></div>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[12px] font-semibold text-gray-500 uppercase">Text Alignment</label>
-                  <div className="grid grid-cols-3 gap-px bg-gray-200 border border-gray-200 rounded-lg overflow-hidden">
-                    <button className="bg-white py-2 text-xs font-medium hover:bg-gray-50">Left</button>
-                    <button className="bg-gray-50 py-2 text-xs font-bold text-blue-600">Center</button>
-                    <button className="bg-white py-2 text-xs font-medium hover:bg-gray-50">Right</button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[12px] font-semibold text-gray-500 uppercase">Custom CSS</label>
-                  <pre className="bg-[#1e293b] text-blue-300 p-3 rounded-lg text-xs leading-relaxed font-mono overflow-x-auto">
-                    .custom-class {"{"}
-                      color: red;
-                    {"}"}
-                  </pre>
-                </div>
-
-              </div>
-
-              <div className="p-5 border-t border-gray-100 mt-auto bg-gray-50">
-                <button className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 rounded-md transition-all">
-                  <TrashIcon className="w-4 h-4" /> Remove section
-                </button>
-              </div>
-            </>
-          ) : (
-             <div className="flex flex-col items-center justify-center h-full p-10 text-center space-y-4 opacity-40">
-                <ArchiveBoxIcon className="w-12 h-12 text-gray-300" />
-                <p className="text-sm font-medium text-gray-500 leading-relaxed">Select an element to customize its appearance</p>
-             </div>
-          )}
+        {/* INSPECTOR: THE DYNAMIC FORM ENGINE */}
+        <aside className="w-[360px] bg-white border-l border-gray-200 flex flex-col z-[40] shrink-0 shadow-2xl">
+          <AnimatePresence mode="wait">
+            <Inspector key={store.selectedId} id={store.selectedId} section={activeSection} />
+          </AnimatePresence>
         </aside>
 
       </div>
 
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        .font-inter { font-family: 'Inter', -apple-system, sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 20px; }
+        .font-sans { font-family: 'Inter', sans-serif; }
       `}</style>
     </div>
   );
