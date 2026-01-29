@@ -51,6 +51,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    tailwindcss(),
     remix({
       ignoredRouteFiles: ["**/.*"],
       future: {
