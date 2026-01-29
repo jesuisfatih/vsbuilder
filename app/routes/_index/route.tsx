@@ -1,12 +1,28 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
-import { login } from "../../shopify.server";
+import { authenticate, login } from "../../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
+  const shop = url.searchParams.get("shop");
+  const embedded = url.searchParams.get("embedded");
+  const idToken = url.searchParams.get("id_token");
 
-  if (url.searchParams.get("shop")) {
+  // If this is an embedded request with id_token, try to authenticate
+  if (shop && embedded === "1" && idToken) {
+    try {
+      // Try to authenticate - if successful, redirect to /app
+      await authenticate.admin(request);
+      return redirect("/app");
+    } catch (error) {
+      // If authentication fails, it will throw a redirect to OAuth
+      throw error;
+    }
+  }
+
+  // If just shop parameter (non-embedded), start login flow
+  if (shop) {
     throw await login(request);
   }
 
