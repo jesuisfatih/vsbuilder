@@ -1,3 +1,43 @@
-.cache
-build
+# Dependencies
 node_modules
+
+# Build outputs
+build
+.cache
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Environment files (will be injected via Docker Compose)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage
+.nyc_output
+
+# Prisma
+prisma/migrations/*_migration.sql
+
+# Shopify CLI
+.shopify
+
+# Misc
+*.md
+!README.md
+docker-compose*.yml
+Caddyfile

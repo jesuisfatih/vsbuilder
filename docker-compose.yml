@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  # ===========================================
+  # VSBuilder - Shopify App (Node.js + Remix)
+  # ===========================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    container_name: vsbuilder-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://vsbuilder:${DB_PASSWORD}@postgres:5432/vsbuilder
+      - SHOPIFY_API_KEY=${SHOPIFY_API_KEY}
+      - SHOPIFY_API_SECRET=${SHOPIFY_API_SECRET}
+      - SHOPIFY_APP_URL=https://vsbuilder.techifyboost.com
+      - SCOPES=${SCOPES}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - vsbuilder-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===========================================
+  # PostgreSQL - Production Database
+  # ===========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: vsbuilder-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=vsbuilder
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=vsbuilder
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - vsbuilder-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vsbuilder -d vsbuilder"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ===========================================
+  # Caddy - Reverse Proxy with Auto HTTPS
+  # ===========================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: vsbuilder-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks:
+      - vsbuilder-network
+
+networks:
+  vsbuilder-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
