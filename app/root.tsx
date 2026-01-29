@@ -1,11 +1,14 @@
-import { json, type LinksFunction, type LoaderFunctionArgs } from "@remix-run/node";
+import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import {
+    isRouteErrorResponse,
     Links,
     Meta,
     Outlet,
     Scripts,
     ScrollRestoration,
     useLoaderData,
+    useRouteError,
 } from "@remix-run/react";
 import { addDocumentResponseHeaders, authenticate } from "./shopify.server";
 import tailwindStyles from "./styles/tailwind.css?url";
@@ -16,7 +19,6 @@ export const links: LinksFunction = () => [
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // authenticate.admin yönlendirmeleri (Redirect) kendisi yönetir, dokunmuyoruz.
   await authenticate.admin(request);
 
   return json(
@@ -29,23 +31,60 @@ export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
 
   return (
-    <html>
+    <html lang="en">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <meta name="shopify-api-key" content={apiKey} />
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-        <link rel="preconnect" href="https://cdn.shopify.com/" />
-        <link
-          rel="stylesheet"
-          href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
-        />
         <Meta />
         <Links />
       </head>
       <body>
         <Outlet />
         <ScrollRestoration />
+        <Scripts />
+      </body>
+    </html>
+  );
+}
+
+// Hata olursa Beyaz Ekran yerine bunu gösterecek
+export function ErrorBoundary() {
+  const error = useRouteError();
+  let errorMessage = "Unknown error";
+  let errorStack = "";
+
+  if (isRouteErrorResponse(error)) {
+    errorMessage = `${error.status} ${error.statusText} - ${error.data}`;
+  } else if (error instanceof Error) {
+    errorMessage = error.message;
+    errorStack = error.stack || "";
+  }
+
+  return (
+    <html>
+      <head>
+        <title>Application Error</title>
+        <Meta />
+        <Links />
+        <style dangerouslySetInnerHTML={{ __html: `
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 2rem; background: #fef2f2; color: #991b1b; }
+          .container { max-width: 800px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+          h1 { margin-top: 0; color: #b91c1c; }
+          pre { background: #f3f4f6; padding: 1rem; border-radius: 4px; overflow-x: auto; color: #374151; font-size: 0.9rem; }
+        `}} />
+      </head>
+      <body>
+        <div className="container">
+          <h1>Application Error</h1>
+          <p>The application encountered an error while rendering.</p>
+          <p><strong>Error:</strong> {errorMessage}</p>
+          {errorStack && (
+            <details>
+              <summary>View Stack Trace</summary>
+              <pre>{errorStack}</pre>
+            </details>
+          )}
+        </div>
         <Scripts />
       </body>
     </html>
