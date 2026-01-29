@@ -1,15 +1,25 @@
-import { closestCenter, DndContext } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+    closestCenter,
+    DndContext
+} from "@dnd-kit/core";
+import {
+    SortableContext,
+    useSortable,
+    verticalListSortingStrategy
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-    ArrowLeftIcon,
-    CloudArrowUpIcon,
-    Cog6ToothIcon,
+    ArrowUturnLeftIcon,
+    ArrowUturnRightIcon,
+    Bars2Icon,
+    ChevronDownIcon,
     ComputerDesktopIcon,
     DevicePhoneMobileIcon,
+    EllipsisHorizontalIcon,
     EyeIcon,
+    EyeSlashIcon,
     PlusIcon,
-    Squares2X2Icon
+    TrashIcon
 } from "@heroicons/react/24/outline";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -19,237 +29,346 @@ import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { authenticate } from "../shopify.server";
 
-// --- Types ---
-type Section = {
+/**
+ * TYPES
+ */
+interface EditorBlock {
   id: string;
   type: string;
   name: string;
-  settings: Record<string, any>;
-};
+  isVisible: boolean;
+}
 
-// --- Loader ---
+interface EditorSection {
+  id: string;
+  type: string;
+  name: string;
+  isVisible: boolean;
+  blocks: EditorBlock[];
+}
+
+interface PageData {
+  header: EditorSection[];
+  template: EditorSection[];
+  footer: EditorSection[];
+}
+
+/**
+ * LOADER
+ */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
-  // Mock Data: Gerçekte Theme API'den gelecek
-  const mockSections: Section[] = [
-    { id: "1", type: "header", name: "Header", settings: {} },
-    { id: "2", type: "hero-slider", name: "Hero Slider", settings: { title: "Welcome" } },
-    { id: "3", type: "product-grid", name: "Featured Products", settings: { limit: 4 } },
-    { id: "4", type: "footer", name: "Footer", settings: {} },
-  ];
-  return json({ sections: mockSections });
+
+  // Real implementasyon Shopify Theme Settings JSON'dan beslenecek
+  const initialData: PageData = {
+    header: [
+      { id: "h1", name: "Announcement bar", type: "header-block", isVisible: true, blocks: [] },
+      { id: "h2", name: "Header", type: "header-main", isVisible: true, blocks: [] },
+    ],
+    template: [
+      { id: "s1", name: "HYDRO Floating Widgets", type: "hydro-widgets", isVisible: true, blocks: [] },
+      { id: "s2", name: "HYDRO Glass Cards", type: "hydro-cards", isVisible: true, blocks: [] },
+      { id: "s3", name: "HYDRO Premium Stats", type: "hydro-stats", isVisible: true, blocks: [] },
+    ],
+    footer: [
+      { id: "f1", name: "Footer", type: "footer", isVisible: true, blocks: [] },
+    ]
+  };
+
+  return json({ initialData });
 };
 
-// --- Sortable Item Component ---
-function SortableItem({ id, name, active }: { id: string, name: string, active: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id });
+/**
+ * COMPONENTS
+ */
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
+const SidebarItem = ({
+  item,
+  active,
+  onClick,
+  isChild = false
+}: {
+  item: EditorSection | EditorBlock,
+  active: boolean,
+  onClick: () => void,
+  isChild?: boolean
+}) => {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
       className={clsx(
-        "group flex items-center gap-3 p-3 mb-2 rounded-lg cursor-grab active:cursor-grabbing transition-all border",
-        active
-          ? "bg-blue-50 border-blue-200 shadow-sm"
-          : "bg-white border-transparent hover:bg-gray-50 hover:border-gray-200"
+        "group flex items-center justify-between py-2 px-3 rounded-md cursor-default transition-all duration-200 select-none",
+        active ? "bg-[#e2e8f0] text-black shadow-sm" : "hover:bg-[#f1f5f9] text-[#4a5568]",
+        isChild && "ml-4"
       )}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
-      <Squares2X2Icon className="w-5 h-5 text-gray-400 group-hover:text-gray-600" />
-      <span className={clsx("text-sm font-medium", active ? "text-blue-700" : "text-gray-700")}>
-        {name}
-      </span>
+      <div className="flex items-center gap-3">
+        <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity">
+          <Bars2Icon className="w-4 h-4 text-gray-400" />
+        </div>
+        <span className="text-[13px] font-medium leading-none truncate max-w-[160px]">
+          {item.name}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button className="p-1 hover:bg-white rounded transition-colors">
+          {item.isVisible ? <EyeIcon className="w-3.5 h-3.5" /> : <EyeSlashIcon className="w-3.5 h-3.5 text-red-500" />}
+        </button>
+      </div>
     </div>
   );
-}
+};
 
-// --- Main Editor Component ---
+const SidebarGroup = ({
+  title,
+  items,
+  activeId,
+  onSelect
+}: {
+  title: string,
+  items: EditorSection[],
+  activeId: string | null,
+  onSelect: (id: string) => void
+}) => {
+  const [isOpen, setIsOpen] = useState(true);
+
+  return (
+    <div className="mb-6">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-3 mb-2 group"
+      >
+        <span className="text-[11px] font-bold text-[#64748b] uppercase tracking-wider">{title}</span>
+        <ChevronDownIcon className={clsx("w-3 h-3 text-gray-400 transition-transform", !isOpen && "-rotate-90")} />
+      </button>
+
+      {isOpen && (
+        <div className="space-y-0.5 px-1">
+          <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+            {items.map((item) => (
+              <div key={item.id}>
+                <SidebarItem
+                  item={item}
+                  active={activeId === item.id}
+                  onClick={() => onSelect(item.id)}
+                />
+                {item.blocks && item.blocks.map(block => (
+                   <SidebarItem
+                    key={block.id}
+                    item={block}
+                    active={activeId === block.id}
+                    onClick={() => onSelect(block.id)}
+                    isChild
+                  />
+                ))}
+              </div>
+            ))}
+          </SortableContext>
+          <button className="w-full flex items-center gap-2 px-4 py-2 mt-1 text-[12px] font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+            <PlusIcon className="w-3.5 h-3.5" /> Add section
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * EDITOR MAIN
+ */
 export default function Editor() {
-  const { sections: initialSections } = useLoaderData<typeof loader>();
+  const { initialData } = useLoaderData<typeof loader>();
   const shopify = useAppBridge();
 
-  const [sections, setSections] = useState<Section[]>(initialSections);
-  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
-  const [deviceMode, setDeviceMode] = useState<"desktop" | "mobile">("desktop");
-  const [isSaving, setIsSaving] = useState(false);
+  const [pageData, setPageData] = useState<PageData>(initialData);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [isChanged, setIsChanged] = useState(false);
 
-  // Fullscreen Enforce
+  // Fullscreen Entry
   useEffect(() => {
     const fullscreen = Fullscreen.create(shopify);
     fullscreen.dispatch(Fullscreen.Action.ENTER);
     return () => { fullscreen.dispatch(Fullscreen.Action.EXIT); };
   }, [shopify]);
 
-  // Drag End Handler
-  const handleDragEnd = (event: any) => {
-    const { active, over } = event;
-    if (active.id !== over.id) {
-       // Reorder logic (basitleştirilmiş)
-       console.log("Reordered");
-    }
-  };
+  const selectedItem = [...pageData.header, ...pageData.template, ...pageData.footer].find(i => i.id === selectedId);
 
   return (
-    <div className="h-screen flex flex-col bg-[#f1f1f1] font-sans antialiased overflow-hidden">
+    <div className="h-screen flex flex-col bg-[#f6f6f7] text-[#1a1c1e] antialiased overflow-hidden font-inter select-none">
 
-      {/* 1. TOP BAR */}
-      <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 z-50 shadow-sm shrink-0">
-        <div className="flex items-center gap-6">
-           <button onClick={() => history.back()} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500">
-             <ArrowLeftIcon className="w-5 h-5" />
+      {/* HEADER / NAVIGATION BAR */}
+      <nav className="h-[52px] bg-white border-b border-[#d1d5db] flex items-center justify-between px-4 z-[100] relative">
+        <div className="flex items-center gap-4 flex-1">
+          <div className="flex items-center gap-2 pr-4 border-r border-gray-200">
+             <div className="w-8 h-8 flex items-center justify-center bg-black text-white rounded-lg font-black text-lg">V</div>
+             <div className="flex flex-col leading-tight">
+                <span className="text-[14px] font-semibold text-gray-900 leading-none">VSBuilder</span>
+                <span className="text-[10px] text-gray-500 font-medium">techify-BEHYDRO-v5-Theme</span>
+             </div>
+          </div>
+
+          {/* PAGE SELECTOR */}
+          <button className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-100 rounded-md transition-colors">
+             <span className="text-[13px] font-medium">Home page</span>
+             <ChevronDownIcon className="w-3.5 h-3.5 text-gray-400" />
+          </button>
+        </div>
+
+        {/* VIEWPORT CONTROLS */}
+        <div className="flex items-center gap-1 bg-[#f1f5f9] p-1 rounded-lg">
+           <button
+             onClick={() => setDevice("desktop")}
+             className={clsx("p-1.5 rounded-md", device === "desktop" ? "bg-white shadow-sm text-black" : "text-gray-400 hover:text-gray-600")}
+           >
+             <ComputerDesktopIcon className="w-4 h-4" />
            </button>
-           <div>
-             <h1 className="text-base font-bold text-gray-900 tracking-tight">Main Page</h1>
-             <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-               <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Live on Store
-             </span>
+           <button
+             onClick={() => setDevice("mobile")}
+             className={clsx("p-1.5 rounded-md", device === "mobile" ? "bg-white shadow-sm text-black" : "text-gray-400 hover:text-gray-600")}
+           >
+             <DevicePhoneMobileIcon className="w-4 h-4" />
+           </button>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 flex-1">
+           <div className="flex items-center gap-1.5 mr-4 text-gray-400">
+             <button className="p-1.5 hover:text-gray-600 disabled:opacity-30"><ArrowUturnLeftIcon className="w-4 h-4" /></button>
+             <button className="p-1.5 hover:text-gray-600 disabled:opacity-30"><ArrowUturnRightIcon className="w-4 h-4" /></button>
            </div>
-        </div>
-
-        <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-lg">
-           <button
-             onClick={() => setDeviceMode("desktop")}
-             className={clsx("p-2 rounded-md transition-all", deviceMode === "desktop" ? "bg-white shadow text-black" : "text-gray-500 hover:text-gray-700")}
-           >
-             <ComputerDesktopIcon className="w-5 h-5" />
-           </button>
-           <button
-             onClick={() => setDeviceMode("mobile")}
-             className={clsx("p-2 rounded-md transition-all", deviceMode === "mobile" ? "bg-white shadow text-black" : "text-gray-500 hover:text-gray-700")}
-           >
-             <DevicePhoneMobileIcon className="w-5 h-5" />
+           <button className="px-3 py-1.5 text-[13px] font-semibold text-gray-700 hover:bg-gray-100 rounded-md">Publish</button>
+           <button className={clsx(
+             "px-5 py-1.5 text-[13px] font-bold rounded-md transition-all shadow-lg shadow-black/10 active:scale-[0.98]",
+             isChanged ? "bg-[#008060] text-white hover:bg-[#006e52]" : "bg-white border border-[#d1d5db] text-gray-400 cursor-not-allowed"
+           )}>
+             Save
            </button>
         </div>
+      </nav>
 
-        <div className="flex items-center gap-3">
-           <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
-              <EyeIcon className="w-4 h-4" /> Preview
-           </button>
-           <button
-             onClick={() => setIsSaving(true)}
-             className="flex items-center gap-2 px-6 py-2 text-sm font-bold text-white bg-black rounded-lg hover:bg-gray-800 shadow-lg shadow-gray-200/50 transition-all active:scale-95"
-           >
-              {isSaving ? "Saving..." : <><CloudArrowUpIcon className="w-4 h-4" /> Save</>}
-           </button>
-        </div>
-      </div>
-
+      {/* MAIN CONTAINER */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* 2. LEFT SIDEBAR (SECTIONS) */}
-        <div className="w-[320px] bg-white border-r border-gray-200 flex flex-col shrink-0 z-40">
-           <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Layers</h2>
-              <button className="p-1.5 hover:bg-gray-200 rounded text-gray-500 transition-colors">
-                <PlusIcon className="w-4 h-4" />
-              </button>
-           </div>
+        {/* LEFT SIDEBAR: THE TREE */}
+        <aside className="w-[280px] bg-white border-r border-[#d1d5db] flex flex-col shrink-0">
+          <div className="flex-1 overflow-y-auto px-2 pt-4 custom-scrollbar">
+             <DndContext collisionDetection={closestCenter}>
+               <SidebarGroup
+                 title="Header"
+                 items={pageData.header}
+                 activeId={selectedId}
+                 onSelect={setSelectedId}
+               />
+               <SidebarGroup
+                 title="Template"
+                 items={pageData.template}
+                 activeId={selectedId}
+                 onSelect={setSelectedId}
+               />
+               <SidebarGroup
+                 title="Footer"
+                 items={pageData.footer}
+                 activeId={selectedId}
+                 onSelect={setSelectedId}
+               />
+             </DndContext>
+          </div>
+        </aside>
 
-           <div className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar">
-              <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <SortableContext items={sections} strategy={verticalListSortingStrategy}>
-                  {sections.map((section) => (
-                    <div key={section.id} onClick={() => setActiveSectionId(section.id)}>
-                      <SortableItem
-                         id={section.id}
-                         name={section.name}
-                         active={activeSectionId === section.id}
-                      />
-                    </div>
-                  ))}
-                </SortableContext>
-              </DndContext>
-           </div>
-
-           <div className="p-4 border-t border-gray-100 bg-gray-50 text-center">
-             <button className="w-full py-2.5 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors dashed-border">
-               + Add Section
-             </button>
-           </div>
-        </div>
-
-        {/* 3. CENTER (CANVAS) */}
-        <div className="flex-1 bg-[#e4e5e7] relative flex items-center justify-center overflow-hidden w-full h-full">
-           {/* Grid Pattern Background */}
-           <div className="absolute inset-0 opacity-[0.03] pointer-events-none"
-                style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }}
-           />
-
+        {/* CENTER: LIVE PREVIEW */}
+        <main className="flex-1 bg-[#e4e5e7] relative flex items-center justify-center p-4">
+           {/* Device Frame */}
            <div className={clsx(
-             "transition-all duration-500 ease-[cubic-bezier(0.25,0.8,0.25,1)] shadow-2xl bg-white overflow-hidden ring-1 ring-black/5",
-             deviceMode === "mobile"
-               ? "w-[375px] h-[812px] rounded-[40px] border-[8px] border-gray-900"
-               : "w-[95%] h-[92%] rounded-xl"
+              "bg-white shadow-[0_40px_100px_rgba(0,0,0,0.15)] ring-1 ring-black/5 relative transition-all duration-500 ease-[cubic-bezier(0.25,0.8,0.25,1)]",
+              device === "mobile"
+                ? "w-[375px] h-full max-h-[780px] rounded-[48px] border-[12px] border-[#1e293b]"
+                : "w-full h-full rounded-lg"
            )}>
+              {/* Device Notch for mobile */}
+              {device === "mobile" && (
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-[#1e293b] rounded-b-2xl z-20 flex items-center justify-center">
+                   <div className="w-10 h-1 bg-gray-800 rounded-full"></div>
+                </div>
+              )}
+
               <iframe
                 src="/"
-                title="Preview"
-                className="w-full h-full border-none bg-white"
-                sandbox="allow-scripts allow-same-origin allow-forms"
+                className="w-full h-full rounded-none"
+                style={{ borderRadius: device === "mobile" ? "36px" : "4px" }}
               />
            </div>
-        </div>
+        </main>
 
-        {/* 4. RIGHT SIDEBAR (SETTINGS) */}
-        <div className="w-[340px] bg-white border-l border-gray-200 flex flex-col shrink-0 z-40">
-           <div className="h-14 border-b border-gray-100 flex items-center px-5 bg-gray-50/50">
-             <h2 className="text-sm font-bold text-gray-800">
-               {activeSectionId ? sections.find(s => s.id === activeSectionId)?.name : "Settings"}
-             </h2>
-           </div>
+        {/* RIGHT SIDEBAR: INSPECTOR */}
+        <aside className="w-[320px] bg-white border-l border-[#d1d5db] flex flex-col shrink-0">
+          {selectedItem ? (
+            <>
+              <div className="h-14 flex items-center justify-between px-5 border-b border-gray-100 flex-none bg-[#f8fafc]">
+                <h3 className="text-[14px] font-bold text-gray-900">{selectedItem.name}</h3>
+                <button className="p-1.5 hover:bg-gray-200 rounded text-gray-400"><EllipsisHorizontalIcon className="w-5 h-5" /></button>
+              </div>
 
-           <div className="flex-1 overflow-y-auto p-0">
-             {activeSectionId ? (
-                <div className="space-y-6 p-5">
-                   {/* Mock Controls - Gelecekte Dinamik Olacak */}
-                   <div className="space-y-2">
-                     <label className="text-xs font-semibold text-gray-600 uppercase">Heading</label>
-                     <input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-black focus:border-transparent outline-none transition-shadow" placeholder="Enter title" />
-                   </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-8 scrollbar-hide">
 
-                   <div className="space-y-2">
-                     <label className="text-xs font-semibold text-gray-600 uppercase">Description</label>
-                     <textarea rows={4} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-black focus:border-transparent outline-none transition-shadow resize-none" placeholder="Enter content" />
-                   </div>
-
-                   <div className="space-y-2">
-                     <label className="text-xs font-semibold text-gray-600 uppercase">Color Scheme</label>
-                     <div className="flex gap-2">
-                        <button className="w-8 h-8 rounded-full bg-black ring-2 ring-offset-2 ring-gray-300"></button>
-                        <button className="w-8 h-8 rounded-full bg-blue-600"></button>
-                        <button className="w-8 h-8 rounded-full bg-green-500"></button>
-                        <button className="w-8 h-8 rounded-full border border-gray-300 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50">+</button>
-                     </div>
-                   </div>
-
-                   <div className="pt-4 border-t border-gray-100">
-                      <label className="flex items-center gap-3 cursor-pointer group">
-                        <div className="w-10 h-6 bg-gray-200 rounded-full relative group-hover:bg-gray-300 transition-colors">
-                           <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full shadow-sm"></div>
-                        </div>
-                        <span className="text-sm text-gray-600 selection:bg-none">Show on mobile</span>
-                      </label>
-                   </div>
-                </div>
-             ) : (
-               <div className="flex flex-col items-center justify-center h-full text-center p-8 space-y-4">
-                  <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center">
-                    <Cog6ToothIcon className="w-8 h-8 text-gray-300" />
+                {/* DYNAMIC SETTINGS SIMULATION */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] font-semibold text-gray-500 uppercase tracking-tighter">Visibility</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" defaultChecked />
+                      <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#008060]"></div>
+                    </label>
                   </div>
-                  <p className="text-gray-400 text-sm">Select a section from the<br />left panel to edit settings.</p>
-               </div>
-             )}
-           </div>
-        </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[12px] font-semibold text-gray-500 uppercase">Text Alignment</label>
+                  <div className="grid grid-cols-3 gap-px bg-gray-200 border border-gray-200 rounded-lg overflow-hidden">
+                    <button className="bg-white py-2 text-xs font-medium hover:bg-gray-50">Left</button>
+                    <button className="bg-gray-50 py-2 text-xs font-bold text-blue-600">Center</button>
+                    <button className="bg-white py-2 text-xs font-medium hover:bg-gray-50">Right</button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[12px] font-semibold text-gray-500 uppercase">Custom CSS</label>
+                  <pre className="bg-[#1e293b] text-blue-300 p-3 rounded-lg text-xs leading-relaxed font-mono overflow-x-auto">
+                    .custom-class {"{"}
+                      color: red;
+                    {"}"}
+                  </pre>
+                </div>
+
+              </div>
+
+              <div className="p-5 border-t border-gray-100 mt-auto bg-gray-50">
+                <button className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 rounded-md transition-all">
+                  <TrashIcon className="w-4 h-4" /> Remove section
+                </button>
+              </div>
+            </>
+          ) : (
+             <div className="flex flex-col items-center justify-center h-full p-10 text-center space-y-4 opacity-40">
+                <ArchiveBoxIcon className="w-12 h-12 text-gray-300" />
+                <p className="text-sm font-medium text-gray-500 leading-relaxed">Select an element to customize its appearance</p>
+             </div>
+          )}
+        </aside>
 
       </div>
+
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .font-inter { font-family: 'Inter', -apple-system, sans-serif; }
+      `}</style>
     </div>
   );
 }
