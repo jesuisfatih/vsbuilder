@@ -1,12 +1,14 @@
 import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import {
     Links,
     Meta,
     Outlet,
     Scripts,
     ScrollRestoration,
+    useLoaderData,
 } from "@remix-run/react";
-import { addDocumentResponseHeaders } from "./shopify.server";
+import { addDocumentResponseHeaders, authenticate } from "./shopify.server";
 import tailwindStyles from "./styles/tailwind.css?url";
 
 export const links: LinksFunction = () => [
@@ -15,10 +17,12 @@ export const links: LinksFunction = () => [
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await addDocumentResponseHeaders(request, {});
-  return json({
-    apiKey: process.env.SHOPIFY_API_KEY,
-  });
+  await authenticate.admin(request);
+
+  return json(
+    { apiKey: process.env.SHOPIFY_API_KEY || "" },
+    { headers: await addDocumentResponseHeaders(request) }
+  );
 };
 
 export default function App() {
