@@ -1,10 +1,17 @@
+import type { LinksFunction } from "@remix-run/node";
 import {
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
+    Links,
+    Meta,
+    Outlet,
+    Scripts,
+    ScrollRestoration,
 } from "@remix-run/react";
+import tailwindStyles from "./styles/tailwind.css?url";
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: "https://cdn.shopify.com/static/fonts/inter/v4/styles.css" },
+  { rel: "stylesheet", href: tailwindStyles },
+];
 
 export default function App() {
   return (
