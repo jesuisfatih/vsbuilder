@@ -1,4 +1,4 @@
-import type { LinksFunction } from "@remix-run/node";
+import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import {
     Links,
     Meta,
@@ -6,12 +6,17 @@ import {
     Scripts,
     ScrollRestoration,
 } from "@remix-run/react";
+import { addDocumentResponseHeaders } from "./shopify.server";
 import tailwindStyles from "./styles/tailwind.css?url";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: "https://cdn.shopify.com/static/fonts/inter/v4/styles.css" },
   { rel: "stylesheet", href: tailwindStyles },
 ];
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  return await addDocumentResponseHeaders(request, {});
+};
 
 export default function App() {
   return (
