@@ -1,5 +1,4 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import { Link, Outlet, useLoaderData, useRouteError } from "@remix-run/react";
 import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
@@ -11,12 +10,10 @@ import { authenticate } from "../shopify.server";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  // Admin authentication - bu route'a gelen tüm istekler için
+  await authenticate.admin(request);
 
-  return json(
-    { apiKey: process.env.SHOPIFY_API_KEY || "" },
-    { headers: { "Content-Type": "application/json" } }
-  );
+  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
 export default function App() {

@@ -1,16 +1,13 @@
-import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { LinksFunction } from "@remix-run/node";
 import {
-    isRouteErrorResponse,
     Links,
     Meta,
     Outlet,
     Scripts,
     ScrollRestoration,
-    useLoaderData,
+    isRouteErrorResponse,
     useRouteError,
 } from "@remix-run/react";
-import { addDocumentResponseHeaders, authenticate } from "./shopify.server";
 import tailwindStyles from "./styles/tailwind.css?url";
 
 export const links: LinksFunction = () => [
@@ -18,18 +15,13 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: tailwindStyles },
 ];
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-
-  return json(
-    { apiKey: process.env.SHOPIFY_API_KEY || "" },
-    { headers: await addDocumentResponseHeaders(request) }
-  );
+// Root loader için authentication YAPMIYORUZ
+// Authentication, korunan route'larda (app.tsx gibi) yapılmalı
+export const loader = async () => {
+  return null;
 };
 
 export default function App() {
-  const { apiKey } = useLoaderData<typeof loader>();
-
   return (
     <html lang="en">
       <head>
