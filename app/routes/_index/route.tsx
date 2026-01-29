@@ -1,27 +1,24 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
-import { authenticate, login } from "../../shopify.server";
+import { login } from "../../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
   const embedded = url.searchParams.get("embedded");
-  const idToken = url.searchParams.get("id_token");
 
-  // If this is an embedded request with id_token, try to authenticate
-  if (shop && embedded === "1" && idToken) {
-    try {
-      // Try to authenticate - if successful, redirect to /app
-      await authenticate.admin(request);
-      return redirect("/app");
-    } catch (error) {
-      // If authentication fails, it will throw a redirect to OAuth
-      throw error;
-    }
+  // For embedded apps, always redirect to /app and let that handle auth
+  if (embedded === "1" && shop) {
+    // Build the full URL with all params for /app
+    const appUrl = new URL("/app", url.origin);
+    url.searchParams.forEach((value, key) => {
+      appUrl.searchParams.set(key, value);
+    });
+    return redirect(appUrl.toString());
   }
 
-  // If just shop parameter (non-embedded), start login flow
+  // Non-embedded: if shop param exists, start login flow
   if (shop) {
     throw await login(request);
   }
