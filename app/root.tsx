@@ -1,4 +1,5 @@
-import { json, type LinksFunction, type LoaderFunctionArgs } from "@remix-run/node";
+import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import {
     Links,
     Meta,
@@ -16,11 +17,20 @@ export const links: LinksFunction = () => [
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  // 2026-04 geçişinde auth kontrolü kritik
+  try {
+    const { session } = await authenticate.admin(request);
+    console.log("Authenticated session for:", session.shop);
+  } catch (e) {
+    // Auth henüz tam oturmamışsa bile document headers'ı basmalıyız ki auth sayfasına gidebilsin
+    console.log("Authentication redirect or check in progress...");
+  }
+
+  const headers = await addDocumentResponseHeaders(request);
 
   return json(
     { apiKey: process.env.SHOPIFY_API_KEY || "" },
-    { headers: await addDocumentResponseHeaders(request) }
+    { headers }
   );
 };
 

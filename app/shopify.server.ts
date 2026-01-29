@@ -6,10 +6,13 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 
+// Biz 2026-04 vizyonundayız, bu yüzden en güncelini manuel set ediyoruz
+const API_VERSION = "2026-04";
+
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
-  apiVersion: "2026-04" as any,
+  apiVersion: API_VERSION as any,
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
@@ -25,7 +28,7 @@ const shopify = shopifyApp({
 });
 
 export default shopify;
-export const apiVersion = "2026-04";
+export const apiVersion = API_VERSION;
 export const addDocumentResponseHeaders = shopify.addDocumentResponseHeaders;
 export const authenticate = shopify.authenticate;
 export const unauthenticated = shopify.unauthenticated;
