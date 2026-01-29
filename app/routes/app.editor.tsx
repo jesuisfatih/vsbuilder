@@ -211,34 +211,17 @@ export default function Editor() {
   const shopifyBridge = useAppBridge();
   const store = useEditorStore();
 
-  // Enter fullscreen mode when editor mounts
+  // Fullscreen mode is controlled by ?fullscreen=true URL parameter
+  // The App Bridge automatically handles this when the parameter is present
+  // We just need to provide a way to exit fullscreen
   useEffect(() => {
-    // Shopify App Bridge Fullscreen API
-    // This makes the app take over the entire screen like Theme Customizer
-    if (shopifyBridge) {
-      try {
-        // @ts-ignore - Fullscreen API
-        shopifyBridge.dispatch({
-          type: 'APP::FULLSCREEN::OPEN',
-        });
-      } catch (e) {
-        console.log('[Editor] Fullscreen dispatch error:', e);
-      }
-    }
+    // Check if we're in fullscreen mode
+    const urlParams = new URLSearchParams(window.location.search);
+    const isFullscreen = urlParams.get('fullscreen') === 'true';
 
-    // Cleanup: exit fullscreen when leaving the editor
-    return () => {
-      if (shopifyBridge) {
-        try {
-          // @ts-ignore
-          shopifyBridge.dispatch({
-            type: 'APP::FULLSCREEN::CLOSE',
-          });
-        } catch (e) {
-          console.log('[Editor] Fullscreen close error:', e);
-        }
-      }
-    };
+    if (isFullscreen && shopifyBridge) {
+      console.log('[Editor] Running in fullscreen mode');
+    }
   }, [shopifyBridge]);
 
   // Initialize store with theme data

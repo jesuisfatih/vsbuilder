@@ -33,7 +33,7 @@ export default function Index() {
                  size="large"
                  fullWidth
                  icon={() => <RocketLaunchIcon className="w-5 h-5 mr-1" />}
-                 onClick={() => navigate("/app/editor")}
+                 onClick={() => navigate("/app/editor?fullscreen=true")}
                >
                  Launch Editor
                </Button>
