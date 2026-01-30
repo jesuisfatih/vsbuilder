@@ -22,6 +22,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  ArrowPathIcon,
   ArrowTopRightOnSquareIcon,
   ArrowUturnLeftIcon,
   ArrowUturnRightIcon,
@@ -49,7 +50,6 @@ import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { VisualCanvas } from "../components/VisualCanvas";
 import {
   getDefaultSettings,
   SECTION_CATEGORIES,
@@ -2324,10 +2324,66 @@ export default function Editor() {
             </div>
           </aside>
 
-          {/* MAIN PREVIEW - Visual Canvas */}
+          {/* MAIN PREVIEW - Real Theme Iframe */}
           <main className="editor-main">
-            <VisualCanvas />
+            <div className="editor-preview">
+              {/* Browser Chrome Header */}
+              <div className="editor-preview__header">
+                <div className="editor-preview__controls">
+                  <span className="editor-preview__dot editor-preview__dot--red" />
+                  <span className="editor-preview__dot editor-preview__dot--yellow" />
+                  <span className="editor-preview__dot editor-preview__dot--green" />
+                </div>
+                <div className="editor-preview__url-bar">
+                  <span className="editor-preview__lock">🔒</span>
+                  <span className="editor-preview__url">{store.previewUrl}</span>
+                </div>
+                <div className="editor-preview__actions">
+                  <button
+                    onClick={() => {
+                      setIframeReady(false);
+                      let path = "/";
+                      if (currentTemplate === "product") path = "/products/first";
+                      else if (currentTemplate === "collection") path = "/collections/all";
+                      else if (currentTemplate === "cart") path = "/cart";
+                      else if (currentTemplate === "search") path = "/search";
+                      previewFetcher.load(`/api/preview?themeId=${themeId}&template=${currentTemplate}&path=${encodeURIComponent(path)}`);
+                    }}
+                    className="editor-preview__refresh"
+                    title="Refresh Preview"
+                  >
+                    <ArrowPathIcon className="w-4 h-4" />
+                  </button>
+                  <a
+                    href={store.previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="editor-preview__external"
+                    title="Open in New Tab"
+                  >
+                    <ArrowTopRightOnSquareIcon className="w-4 h-4" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Preview Iframe Container */}
+              <div className="editor-preview__frame-container">
+                {previewFetcher.state === "loading" && (
+                  <div className="editor-preview__loading">
+                    <div className="editor-preview__spinner" />
+                    <span>Loading preview...</span>
+                  </div>
+                )}
+                <iframe
+                  ref={iframeRef}
+                  className="editor-preview__iframe"
+                  title="Theme Preview"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                />
+              </div>
+            </div>
           </main>
+
 
           {/* INSPECTOR */}
           <aside className="editor-sidebar-secondary">
