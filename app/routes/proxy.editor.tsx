@@ -73,6 +73,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         },
       },
       previewUrl,
+      // API configuration for App Proxy mode - uses proxy API routes
+      apiConfig: {
+        syncCheck: '/proxy/api.sync',
+        syncAction: '/proxy/api.sync',
+        renderLocal: '/proxy/api.render-local',
+        render: '/proxy/api.render',
+      },
       error: null,
     });
   } catch (error) {
