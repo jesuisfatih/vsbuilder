@@ -1,11 +1,11 @@
-import { PassThrough } from "stream";
-import { renderToPipeableStream } from "react-dom/server";
-import { RemixServer } from "@remix-run/react";
 import {
-  createReadableStreamFromReadable,
-  type EntryContext,
+    createReadableStreamFromReadable,
+    type EntryContext,
 } from "@remix-run/node";
+import { RemixServer } from "@remix-run/react";
 import { isbot } from "isbot";
+import { renderToPipeableStream } from "react-dom/server";
+import { PassThrough } from "stream";
 import { addDocumentResponseHeaders } from "./shopify.server";
 
 export const streamTimeout = 5000;
@@ -17,6 +17,21 @@ export default async function handleRequest(
   remixContext: EntryContext
 ) {
   addDocumentResponseHeaders(request, responseHeaders);
+
+  // Override CSP to allow store domains to frame the app
+  const existingCSP = responseHeaders.get("Content-Security-Policy") || "";
+  if (existingCSP) {
+    // Replace frame-ancestors to include all myshopify domains
+    const newCSP = existingCSP.replace(
+      /frame-ancestors[^;]*/,
+      "frame-ancestors https://*.myshopify.com https://admin.shopify.com https://*.techifyboost.com"
+    );
+    responseHeaders.set("Content-Security-Policy", newCSP);
+  }
+
+  // Also set X-Frame-Options to allow framing
+  responseHeaders.delete("X-Frame-Options");
+
   const userAgent = request.headers.get("user-agent");
   const callbackName = isbot(userAgent ?? '')
     ? "onAllReady"
