@@ -53,6 +53,8 @@ export interface RenderContext {
     url: string;
     currency: string;
     locale: string;
+    money_format?: string;
+    enabled_payment_types?: string[];
   };
   page_title: string;
   content_for_header: string;
@@ -61,12 +63,14 @@ export interface RenderContext {
   request: {
     path: string;
     host: string;
+    locale?: { iso_code: string };
   };
   settings: Record<string, any>;
   localization: {
     available_languages: { iso_code: string; name: string }[];
     language: { iso_code: string; name: string };
   };
+  [key: string]: any; // Allow additional properties
 }
 
 // ============================================
@@ -78,6 +82,7 @@ export class ShopifyLiquidEngine {
   private themeDir: string;
   private themeFiles: ThemeFiles | null = null;
   private sectionSchemas: Map<string, any[]> = new Map();
+  private locales: Record<string, any> = {};
 
   constructor(themeDir: string) {
     this.themeDir = themeDir;
@@ -96,6 +101,38 @@ export class ShopifyLiquidEngine {
 
     this.registerShopifyTags();
     this.registerShopifyFilters();
+    this.loadLocales();
+  }
+
+  // Load locale files for translations
+  private loadLocales() {
+    const localesDir = path.join(this.themeDir, "locales");
+    if (fs.existsSync(localesDir)) {
+      try {
+        const files = fs.readdirSync(localesDir);
+        for (const file of files) {
+          if (file.endsWith(".json")) {
+            const locale = file.replace(".default.json", "").replace(".json", "");
+            const content = fs.readFileSync(path.join(localesDir, file), "utf-8");
+            this.locales[locale] = JSON.parse(content);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load locales:", e);
+      }
+    }
+  }
+
+  // Get translation by key path
+  private getTranslation(key: string, locale: string = "en"): string {
+    const localeData = this.locales[locale] || this.locales["en"] || Object.values(this.locales)[0] || {};
+    const parts = key.split(".");
+    let value: any = localeData;
+    for (const part of parts) {
+      value = value?.[part];
+      if (value === undefined) break;
+    }
+    return typeof value === "string" ? value : key.split(".").pop() || key;
   }
 
   // ============================================
@@ -192,11 +229,12 @@ export class ShopifyLiquidEngine {
         const match = args.match(/['"]([^'"]+)['"]/);
         this.snippetName = match ? match[1] : args.split(/\s|,/)[0].replace(/['"]/g, "");
 
-        // Parse variable assignments
-        this.assignments = {};
-        const assignMatch = args.matchAll(/(\w+)\s*:\s*([^,]+)/g);
-        for (const m of assignMatch) {
-          this.assignments[m[1]] = m[2].trim();
+        // Parse variable assignments (key: value pairs)
+        this.assignments = [];
+        const assignRegex = /(\w+)\s*:\s*([^,]+)/g;
+        let m;
+        while ((m = assignRegex.exec(args)) !== null) {
+          this.assignments.push({ key: m[1].trim(), valueExpr: m[2].trim().replace(/['"]$/g, "").replace(/^['"]/g, "") });
         }
       },
       async render(scope: any) {
@@ -204,7 +242,27 @@ export class ShopifyLiquidEngine {
           const snippetPath = path.join(self.themeDir, "snippets", `${this.snippetName}.liquid`);
           if (fs.existsSync(snippetPath)) {
             const snippetContent = fs.readFileSync(snippetPath, "utf-8");
-            const context = { ...scope.getAll(), ...this.assignments };
+            const parentContext = scope.getAll();
+            const resolvedAssignments: Record<string, any> = {};
+
+            // Resolve variables from scope
+            for (const { key, valueExpr } of this.assignments) {
+              // Check if it's a quoted string literal
+              if ((valueExpr.startsWith("'") && valueExpr.endsWith("'")) ||
+                  (valueExpr.startsWith('"') && valueExpr.endsWith('"'))) {
+                resolvedAssignments[key] = valueExpr.slice(1, -1);
+              } else {
+                // Try to resolve from scope (supports dot notation like product.title)
+                const parts = valueExpr.split(".");
+                let value: any = parentContext;
+                for (const part of parts) {
+                  value = value?.[part];
+                }
+                resolvedAssignments[key] = value !== undefined ? value : valueExpr;
+              }
+            }
+
+            const context = { ...parentContext, ...resolvedAssignments };
             return await self.engine.parseAndRender(snippetContent, context);
           }
           return `<!-- Snippet not found: ${this.snippetName} -->`;
@@ -219,7 +277,7 @@ export class ShopifyLiquidEngine {
     this.engine.registerTag("form", {
       parse(tagToken: any, remainTokens: any[]) {
         this.formType = tagToken.args.replace(/['"]/g, "").trim();
-        this.formContent = [];
+        this.formContent = "";
         let level = 1;
         let token;
         while ((token = remainTokens.shift())) {
@@ -228,14 +286,12 @@ export class ShopifyLiquidEngine {
             level--;
             if (level === 0) break;
           }
-          this.formContent.push(token);
+          this.formContent += token.raw || token.getText?.() || "";
         }
       },
-      async render(scope: any, emitter: any) {
-        let inner = "";
-        for (const token of this.formContent) {
-          if (token.raw) inner += token.raw;
-        }
+      async render(scope: any) {
+        // Render the inner content as Liquid
+        const inner = await self.engine.parseAndRender(this.formContent, scope.getAll());
         return `<form action="/form/${this.formType}" method="post">${inner}</form>`;
       },
     });
@@ -243,7 +299,8 @@ export class ShopifyLiquidEngine {
     // {% paginate %} ... {% endpaginate %}
     this.engine.registerTag("paginate", {
       parse(tagToken: any, remainTokens: any[]) {
-        this.paginateContent = [];
+        this.paginateArgs = tagToken.args; // e.g., "collection.products by 12"
+        this.paginateContent = "";
         let level = 1;
         let token;
         while ((token = remainTokens.shift())) {
@@ -252,15 +309,25 @@ export class ShopifyLiquidEngine {
             level--;
             if (level === 0) break;
           }
-          this.paginateContent.push(token);
+          this.paginateContent += token.raw || token.getText?.() || "";
         }
       },
       async render(scope: any) {
-        let inner = "";
-        for (const token of this.paginateContent) {
-          if (token.raw) inner += token.raw;
-        }
-        return inner;
+        // Create paginate object for context
+        const paginateContext = {
+          ...scope.getAll(),
+          paginate: {
+            current_page: 1,
+            current_offset: 0,
+            items: 12,
+            parts: [],
+            next: null,
+            previous: null,
+            page_size: 12,
+            pages: 1,
+          },
+        };
+        return await self.engine.parseAndRender(this.paginateContent, paginateContext);
       },
     });
 
@@ -310,6 +377,98 @@ export class ShopifyLiquidEngine {
         return result;
       },
     });
+
+    // {% comment %} ... {% endcomment %}
+    this.engine.registerTag("comment", {
+      parse(tagToken: any, remainTokens: any[]) {
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "endcomment") break;
+        }
+      },
+      render() {
+        return ""; // Comments produce no output
+      },
+    });
+
+    // {% raw %} ... {% endraw %}
+    this.engine.registerTag("raw", {
+      parse(tagToken: any, remainTokens: any[]) {
+        this.rawContent = "";
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "endraw") break;
+          this.rawContent += token.raw || token.getText?.() || "";
+        }
+      },
+      render() {
+        return this.rawContent; // Output as-is without processing
+      },
+    });
+
+    // {% capture variable_name %} ... {% endcapture %}
+    this.engine.registerTag("capture", {
+      parse(tagToken: any, remainTokens: any[]) {
+        this.varName = tagToken.args.trim();
+        this.captureContent = "";
+        let level = 1;
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "capture") level++;
+          if (token.name === "endcapture") {
+            level--;
+            if (level === 0) break;
+          }
+          this.captureContent += token.raw || token.getText?.() || "";
+        }
+      },
+      async render(scope: any) {
+        const rendered = await self.engine.parseAndRender(this.captureContent, scope.getAll());
+        scope.environments[this.varName] = rendered;
+        return "";
+      },
+    });
+
+    // {% increment variable_name %}
+    this.engine.registerTag("increment", {
+      parse(tagToken: any) {
+        this.varName = tagToken.args.trim();
+      },
+      render(scope: any) {
+        const env = scope.environments;
+        if (env[this.varName] === undefined) {
+          env[this.varName] = 0;
+        }
+        const value = env[this.varName];
+        env[this.varName]++;
+        return String(value);
+      },
+    });
+
+    // {% decrement variable_name %}
+    this.engine.registerTag("decrement", {
+      parse(tagToken: any) {
+        this.varName = tagToken.args.trim();
+      },
+      render(scope: any) {
+        const env = scope.environments;
+        if (env[this.varName] === undefined) {
+          env[this.varName] = 0;
+        }
+        env[this.varName]--;
+        return String(env[this.varName]);
+      },
+    });
+
+    // {% echo expression %} - Similar to {{ expression }}
+    this.engine.registerTag("echo", {
+      parse(tagToken: any) {
+        this.expression = tagToken.args.trim();
+      },
+      async render(scope: any) {
+        return await self.engine.parseAndRender(`{{ ${this.expression} }}`, scope.getAll());
+      },
+    });
   }
 
   // ============================================
@@ -317,6 +476,8 @@ export class ShopifyLiquidEngine {
   // ============================================
 
   private registerShopifyFilters() {
+    const self = this;
+
     // Asset URL filter
     this.engine.registerFilter("asset_url", (asset: string) => {
       return `/theme-assets/${asset}`;
@@ -409,13 +570,69 @@ export class ShopifyLiquidEngine {
     });
 
     this.engine.registerFilter("t", (key: string, options?: any) => {
-      // Translation filter - return key for now
-      return key.split(".").pop() || key;
+      // Translation filter - use loaded locales
+      let translation = self.getTranslation(key);
+      // Replace placeholders like {{ count }}
+      if (options && typeof options === "object") {
+        for (const [k, v] of Object.entries(options)) {
+          translation = translation.replace(new RegExp(`{{\\s*${k}\\s*}}`, "g"), String(v));
+        }
+      }
+      return translation;
     });
 
     // JSON filter
     this.engine.registerFilter("json", (value: any) => {
       return JSON.stringify(value);
+    });
+
+    // Collection/Array filters
+    this.engine.registerFilter("where", (array: any[], key: string, value: any) => {
+      if (!Array.isArray(array)) return [];
+      return array.filter((item) => item?.[key] === value);
+    });
+
+    this.engine.registerFilter("map", (array: any[], key: string) => {
+      if (!Array.isArray(array)) return [];
+      return array.map((item) => item?.[key]);
+    });
+
+    this.engine.registerFilter("sort", (array: any[], key?: string) => {
+      if (!Array.isArray(array)) return [];
+      const sorted = [...array];
+      if (key) {
+        sorted.sort((a, b) => {
+          const aVal = a?.[key];
+          const bVal = b?.[key];
+          if (aVal < bVal) return -1;
+          if (aVal > bVal) return 1;
+          return 0;
+        });
+      } else {
+        sorted.sort();
+      }
+      return sorted;
+    });
+
+    this.engine.registerFilter("sort_natural", (array: any[], key?: string) => {
+      if (!Array.isArray(array)) return [];
+      const sorted = [...array];
+      if (key) {
+        sorted.sort((a, b) => String(a?.[key] || "").localeCompare(String(b?.[key] || ""), undefined, { numeric: true }));
+      } else {
+        sorted.sort((a, b) => String(a || "").localeCompare(String(b || ""), undefined, { numeric: true }));
+      }
+      return sorted;
+    });
+
+    this.engine.registerFilter("uniq", (array: any[]) => {
+      if (!Array.isArray(array)) return [];
+      return [...new Set(array)];
+    });
+
+    this.engine.registerFilter("compact", (array: any[]) => {
+      if (!Array.isArray(array)) return [];
+      return array.filter((item) => item != null);
     });
 
     // Stylesheet/Script tags
@@ -544,17 +761,25 @@ export class ShopifyLiquidEngine {
     const sectionBlocks = context.section?.blocks || {};
     const blockOrder = context.section?.block_order || Object.keys(sectionBlocks);
 
+    // Build blocks array in correct order for iteration
+    const blocksArray = blockOrder.map((blockId: string) => {
+      const block = sectionBlocks[blockId];
+      if (!block) return null;
+      return {
+        id: blockId,
+        type: block.type,
+        settings: block.settings || {},
+      };
+    }).filter(Boolean);
+
     const sectionContext = {
       ...context,
       section: {
         id: context.section?.id || `section-${sectionType}`,
         type: sectionType,
         settings: sectionSettings,
-        blocks: Object.entries(sectionBlocks).map(([id, block]: [string, any]) => ({
-          id,
-          type: block.type,
-          settings: block.settings || {},
-        })),
+        blocks: blocksArray,
+        block_order: blockOrder,
       },
       block: null,
     };
@@ -650,13 +875,16 @@ export class ShopifyLiquidEngine {
   // HELPERS
   // ============================================
 
-  private getDefaultContext(): RenderContext {
+  private getDefaultContext(): RenderContext & Record<string, any> {
+    const settings = this.loadThemeSettings();
     return {
       shop: {
         name: "My Store",
         url: "https://mystore.myshopify.com",
         currency: "USD",
         locale: "en",
+        money_format: "${{amount}}",
+        enabled_payment_types: [],
       },
       page_title: "Home",
       content_for_header: "",
@@ -665,12 +893,28 @@ export class ShopifyLiquidEngine {
       request: {
         path: "/",
         host: "mystore.myshopify.com",
+        locale: { iso_code: "en" },
       },
-      settings: this.loadThemeSettings(),
+      settings,
       localization: {
         available_languages: [{ iso_code: "en", name: "English" }],
         language: { iso_code: "en", name: "English" },
       },
+      // Global objects (mock data)
+      product: null,
+      collection: null,
+      collections: [],
+      cart: { item_count: 0, items: [], total_price: 0 },
+      customer: null,
+      all_products: {},
+      pages: [],
+      blogs: [],
+      articles: [],
+      linklists: {},
+      routes: { root_url: "/", cart_url: "/cart", account_url: "/account" },
+      canonical_url: "/",
+      page_description: "",
+      handle: "",
     };
   }
 
