@@ -1,38 +1,68 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.public.appProxy(request);
+  try {
+    const { session } = await authenticate.public.appProxy(request);
 
-  if (!session) {
-    return new Response("Unauthorized", { status: 401 });
+    if (!session) {
+      return new Response("Unauthorized: Invalid signature or session not found", { status: 401 });
+    }
+
+    // Return simple HTML to verify connection
+    // We use application/liquid content type for Shopify Proxy to process it properly
+    return new Response(`
+      {% layout none %}
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <title>VSBuilder Editor</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #f6f6f7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            color: #202223;
+          }
+          .card {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 400px;
+          }
+          h1 { color: #008060; margin-top: 0; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Proxy Active 🚀</h1>
+          <p>Connected to <strong>${session.shop}</strong></p>
+          <p>The editor is ready to separate from the admin panel.</p>
+        </div>
+      </body>
+      </html>
+    `, {
+      headers: {
+        "Content-Type": "application/liquid" // Important header
+      }
+    });
+
+  } catch (error) {
+    console.error("Proxy Loader Error:", error);
+    return new Response(`Proxy Error: ${error instanceof Error ? error.message : "Unknown error"}`, { status: 500 });
   }
-
-  return json({
-    message: "Proxy Works!",
-    shop: session.shop
-  });
 };
 
-export default function AppProxy() {
-  // Simple check
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      background: 'white',
-      zIndex: 999999,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'column'
-    }}>
-      <h1 style={{ fontSize: '2rem', marginBottom: '1rem' }}>VSBuilder Editor</h1>
-      <p>Loading App Proxy Mode...</p>
-      <p style={{ color: '#666', marginTop: '1rem' }}>If you see this, the proxy connection is successful.</p>
-    </div>
-  );
+// Since loader returns a Response, the component won't be rendered by Remix in the same way,
+// but if it falls through, render null.
+export default function Proxy() {
+  return null;
 }
