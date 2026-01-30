@@ -1658,11 +1658,33 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
 };
 
 // ============================================
-// MAIN EDITOR COMPONENT
+// EDITOR CORE COMPONENT (reusable)
 // ============================================
 
-export default function Editor() {
-  const { initialData, shop, themeId, themeName, themeRole, sourceThemeId, previewUrl, currentTemplate, availableTemplates, error } = useLoaderData<typeof loader>();
+interface EditorCoreProps {
+  loaderData: {
+    initialData: any;
+    shop: string;
+    themeId: string | null;
+    themeName?: string | null;
+    themeRole?: string | null;
+    sourceThemeId?: string | null;
+    previewUrl: string;
+    currentTemplate: string;
+    availableTemplates: Array<{ value: string; label: string; path?: string }>;
+    error?: string | null;
+    apiConfig?: {
+      syncCheck: string;
+      syncAction: string;
+      renderLocal: string;
+      render: string;
+    };
+  };
+  isProxyMode?: boolean;
+}
+
+export function EditorCore({ loaderData, isProxyMode = false }: EditorCoreProps) {
+  const { initialData, shop, themeId, themeName, themeRole, sourceThemeId, previewUrl, currentTemplate, availableTemplates, error, apiConfig } = loaderData;
   const navigate = useNavigate();
   const fetcher = useFetcher();
   const renderFetcher = useFetcher();
@@ -1671,27 +1693,12 @@ export default function Editor() {
   const store = useEditorStore();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Helper function to get correct API paths - uses global flag set by entry.client.tsx
-  const getApiPaths = () => {
-    // Use global flag set by entry.client.tsx BEFORE hydration
-    // This is more reliable than checking window.location.pathname
-    const isProxyMode = typeof window !== 'undefined' && window.__VSBUILDER_PROXY_MODE__ === true;
-    console.log('[getApiPaths] isProxyMode from global flag:', isProxyMode);
-
-    if (isProxyMode) {
-      return {
-        syncCheck: '/proxy/api.sync',
-        syncAction: '/proxy/api.sync',
-        renderLocal: '/proxy/api.render-local',
-        render: '/proxy/api.render',
-      };
-    }
-    return {
-      syncCheck: '/api/theme-sync',
-      syncAction: '/api/theme-sync',
-      renderLocal: '/api/render-local',
-      render: '/api/render',
-    };
+  // API paths - use apiConfig if provided (proxy mode with absolute URLs), otherwise use relative paths
+  const api = apiConfig || {
+    syncCheck: '/api/theme-sync',
+    syncAction: '/api/theme-sync',
+    renderLocal: '/api/render-local',
+    render: '/api/render',
   };
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -1713,7 +1720,12 @@ export default function Editor() {
   const handleTemplateChange = (templateValue: string) => {
     setShowTemplateDropdown(false);
     setIframeReady(false);
-    navigate(`/app/editor?themeId=${themeId}&template=${templateValue}`);
+    // In proxy mode, navigate differently
+    if (isProxyMode) {
+      window.location.href = `${window.location.pathname}?themeId=${themeId}&template=${templateValue}`;
+    } else {
+      navigate(`/app/editor?themeId=${themeId}&template=${templateValue}`);
+    }
   };
 
   // Handle discard all changes
@@ -1746,8 +1758,6 @@ export default function Editor() {
   // Initialize store
   // Check if theme is synced locally and sync if needed
   useEffect(() => {
-    // Get API paths at runtime (client-side only, window is available)
-    const api = getApiPaths();
     console.log('[Editor] API paths:', api);
 
     // Check sync status
@@ -1775,7 +1785,6 @@ export default function Editor() {
   // Handle sync completion
   useEffect(() => {
     if (syncFetcher.data && (syncFetcher.data as any).success) {
-      const api = getApiPaths();
       setThemeSynced(true);
       setSyncing(false);
       // Now load the preview
@@ -1818,7 +1827,6 @@ export default function Editor() {
 
     // Debounce the render request
     const timer = setTimeout(() => {
-      const api = getApiPaths();
       const { sectionId, groupType } = store.selectedPath!;
       const section = store.getSection(sectionId).section;
       if (!section) return;
@@ -2496,4 +2504,13 @@ export default function Editor() {
       </div>
     </DndContext>
   );
+}
+
+// ============================================
+// ADMIN MODE WRAPPER (uses useLoaderData)
+// ============================================
+
+export default function Editor() {
+  const loaderData = useLoaderData<typeof loader>();
+  return <EditorCore loaderData={loaderData as any} isProxyMode={false} />;
 }
