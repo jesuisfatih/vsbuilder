@@ -3,15 +3,21 @@
  * =========================
  * Mağaza domain'inde tam editor - App Proxy auth ile
  *
- * IMPORTANT: Uses AppProxyProvider for proper asset loading and hydration
+ * SSR'dan kaçınmak için ClientOnlyEditor wrapper kullanır.
+ * Bu sayede hydration mismatch problemi ortadan kalkar.
+ *
+ * URL Flow:
+ * https://dtfbank.com/apps/vsbuilder/editor
+ *   ↓ (Shopify Proxy)
+ * https://vsbuilder.techifyboost.com/proxy/editor
+ *   ↓ (Bu route)
+ * Minimal HTML (loading) + Client-side mount (full editor)
  */
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { AppProxyProvider } from "@shopify/shopify-app-remix/react";
+import { ClientOnlyEditor } from "../components/ClientOnlyEditor";
 import { authenticate } from "../shopify.server";
 import { downloadThemeForEditor } from "../utils/theme.server";
-
-// Import the EditorCore component
 import { EditorCore } from "./app.editor";
 
 // Sabit şablon tipleri
@@ -30,13 +36,23 @@ const TEMPLATE_TYPES = [
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const appUrl = process.env.SHOPIFY_APP_URL || "https://vsbuilder.techifyboost.com";
 
+  // API endpoints configuration - ABSOLUTE URLs for proxy mode
+  const apiConfig = {
+    syncCheck: `${appUrl}/proxy/api.sync`,
+    syncAction: `${appUrl}/proxy/api.sync`,
+    renderLocal: `${appUrl}/proxy/api.render-local`,
+    render: `${appUrl}/proxy/api.render`,
+  };
+
   try {
     const { session, admin } = await authenticate.public.appProxy(request);
 
     if (!session || !admin) {
+      console.error("[ProxyEditor] Authentication failed");
       return json({
-        error: "Unauthorized",
+        error: "Unauthorized - Please access through Shopify",
         appUrl,
+        apiConfig,
         shop: "",
         themeId: null,
         themeName: null,
@@ -44,9 +60,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         sourceThemeId: null,
         currentTemplate: "index",
         availableTemplates: TEMPLATE_TYPES,
-        initialData: { template: { sections: {}, order: [] }, header: { sections: {}, order: [] }, footer: { sections: {}, order: [] } },
+        initialData: {
+          template: { sections: {}, order: [] },
+          header: { sections: {}, order: [] },
+          footer: { sections: {}, order: [] }
+        },
         previewUrl: "/",
-        apiConfig: null,
       }, { status: 401 });
     }
 
@@ -55,9 +74,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const templateParam = url.searchParams.get("template") || "index";
 
     if (!themeIdParam) {
+      console.error("[ProxyEditor] Missing themeId");
       return json({
         error: "Theme ID is required",
         appUrl,
+        apiConfig,
         shop: session.shop,
         themeId: null,
         themeName: null,
@@ -65,15 +86,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         sourceThemeId: null,
         currentTemplate: templateParam,
         availableTemplates: TEMPLATE_TYPES,
-        initialData: { template: { sections: {}, order: [] }, header: { sections: {}, order: [] }, footer: { sections: {}, order: [] } },
+        initialData: {
+          template: { sections: {}, order: [] },
+          header: { sections: {}, order: [] },
+          footer: { sections: {}, order: [] }
+        },
         previewUrl: "/",
-        apiConfig: null,
       }, { status: 400 });
     }
 
     console.log(`[ProxyEditor] Loading for Shop: ${session.shop}, Theme: ${themeIdParam}`);
 
-    // Download theme
+    // Download theme data
     const themeData = await downloadThemeForEditor(admin, themeIdParam, templateParam);
 
     if (!themeData) {
@@ -85,6 +109,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     return json({
       appUrl,
+      apiConfig,
       shop: session.shop,
       themeId: themeData.theme.numericId,
       themeName: themeData.theme.name,
@@ -107,19 +132,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         },
       },
       previewUrl,
-      // API configuration for App Proxy mode - use ABSOLUTE URLs
-      apiConfig: {
-        syncCheck: `${appUrl}/proxy/api.sync`,
-        syncAction: `${appUrl}/proxy/api.sync`,
-        renderLocal: `${appUrl}/proxy/api.render-local`,
-        render: `${appUrl}/proxy/api.render`,
-      },
       error: null,
     });
   } catch (error) {
     console.error("[ProxyEditor] Loader error:", error);
     return json({
       appUrl,
+      apiConfig,
       shop: "",
       themeId: null,
       themeName: null,
@@ -127,56 +146,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       sourceThemeId: null,
       currentTemplate: "index",
       availableTemplates: TEMPLATE_TYPES,
-      initialData: { template: { sections: {}, order: [] }, header: { sections: {}, order: [] }, footer: { sections: {}, order: [] } },
+      initialData: {
+        template: { sections: {}, order: [] },
+        header: { sections: {}, order: [] },
+        footer: { sections: {}, order: [] }
+      },
       previewUrl: "/",
-      apiConfig: null,
       error: "Failed to load editor. Please try again.",
     });
   }
 };
 
 /**
- * Proxy Editor Component - wraps EditorCore with AppProxyProvider
+ * Proxy Editor Component
+ * ClientOnlyEditor ile sarmalanmış - hydration mismatch olmaz
  */
 export default function ProxyEditor() {
   const data = useLoaderData<typeof loader>();
 
-  // Show error if no themeId
-  if (data.error && !data.themeId) {
-    return (
-      <AppProxyProvider appUrl={data.appUrl}>
-        <div style={{
-          padding: "40px",
-          textAlign: "center",
-          fontFamily: "system-ui, sans-serif",
-          color: "#333"
-        }}>
-          <h1 style={{ color: "#dc2626", marginBottom: "16px" }}>Error Loading Editor</h1>
-          <p style={{ marginBottom: "24px" }}>{data.error}</p>
-          <a
-            href="/"
-            style={{
-              display: "inline-block",
-              padding: "12px 24px",
-              backgroundColor: "#4f46e5",
-              color: "white",
-              borderRadius: "8px",
-              textDecoration: "none"
-            }}
-          >
-            Go Back
-          </a>
-        </div>
-      </AppProxyProvider>
-    );
-  }
-
   return (
-    <AppProxyProvider appUrl={data.appUrl}>
+    <ClientOnlyEditor>
       <EditorCore
         loaderData={data as any}
         isProxyMode={true}
       />
-    </AppProxyProvider>
+    </ClientOnlyEditor>
   );
+}
+
+/**
+ * Headers for App Proxy
+ * Shopify iframe içinde açılabilmesi için gerekli
+ */
+export function headers() {
+  return {
+    "Content-Security-Policy":
+      "frame-ancestors https://*.myshopify.com https://admin.shopify.com",
+  };
 }
