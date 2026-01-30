@@ -39,8 +39,6 @@ if (host === "localhost") {
 }
 
 export default defineConfig({
-  // Use absolute URL for assets in production so App Proxy can load them
-  base: process.env.NODE_ENV === "production" ? "https://vsbuilder.techifyboost.com/" : "/",
   server: {
     allowedHosts: [host],
     cors: {

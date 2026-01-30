@@ -64,13 +64,13 @@ export default function Index() {
         .replace('gid://shopify/OnlineStoreTheme/', '')
         .replace('gid://shopify/Theme/', '');
 
-      // Open App Proxy editor on store domain (bypasses admin iframe)
-      const editorUrl = `https://${shop}/apps/vsbuilder/editor?themeId=${numericId}`;
+      // Open editor directly on app server (full functionality)
+      const editorUrl = `https://vsbuilder.techifyboost.com/app/editor?themeId=${numericId}`;
       window.open(editorUrl, '_blank');
       setIsNavigating(false);
       toggleModal();
     }
-  }, [selectedTheme, shop, toggleModal]);
+  }, [selectedTheme, toggleModal]);
 
   const renderThemeItem = useCallback((item: ThemeInfo) => {
     const numericId = item.id
