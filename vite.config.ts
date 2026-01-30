@@ -66,7 +66,7 @@ export default defineConfig({
     }),
     tsconfigPaths(),
   ],
-  base: "/apps/vsbuilder/",
+  base: "/proxy/",
   build: {
     assetsInlineLimit: 0,
     rollupOptions: {
