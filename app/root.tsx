@@ -10,27 +10,12 @@ import {
 } from "@remix-run/react";
 import tailwindStyles from "./styles/tailwind.css?url";
 
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: "https://cdn.shopify.com/static/fonts/inter/v4/styles.css" },
   { rel: "stylesheet", href: tailwindStyles },
 ];
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const url = new URL(request.url);
-  // Check if we are on the proxy editor route
-  // The path usually contains /proxy/editor or /apps/vsbuilder/editor depending on context
-  const isProxyEditor = url.pathname.includes("/proxy/editor");
-
-  return json({ isProxyEditor });
-};
-
 export default function App() {
-  const data = useLoaderData<typeof loader>();
-  const isProxyEditor = data?.isProxyEditor;
-
   return (
     <html lang="en">
       <head>
