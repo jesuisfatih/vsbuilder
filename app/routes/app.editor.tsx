@@ -70,7 +70,7 @@ import {
   type Section,
 } from "../store/useEditorStore";
 import "../styles/editor.css";
-import { getThemeAsset, getThemeById, parseTemplateData } from "../utils/theme.server";
+import { downloadThemeForEditor } from "../utils/theme.server";
 
 // ============================================
 // LOADER
@@ -90,85 +90,60 @@ const TEMPLATE_TYPES = [
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  console.log('[Editor] === Loader starting ===');
+
   try {
     const { admin, session } = await authenticate.admin(request);
     const url = new URL(request.url);
     const themeIdParam = url.searchParams.get("themeId");
     const templateParam = url.searchParams.get("template") || "index";
 
+    console.log('[Editor] Theme ID:', themeIdParam);
+    console.log('[Editor] Template:', templateParam);
+    console.log('[Editor] Shop:', session?.shop);
+
+    // Error response helper
+    const errorResponse = (error: string) => json({
+      shop: session?.shop || "demo-shop",
+      themeId: null,
+      themeName: null,
+      themeRole: null,
+      sourceThemeId: null,
+      currentTemplate: templateParam,
+      availableTemplates: TEMPLATE_TYPES,
+      initialData: {
+        template: { sections: {}, order: [] as string[] },
+        header: { sections: {}, order: [] as string[] },
+        footer: { sections: {}, order: [] as string[] },
+      },
+      previewUrl: "/",
+      error,
+    });
+
     if (!admin || !session) {
-      return json({
-        shop: "demo-shop",
-        themeId: null,
-        themeName: null,
-        themeRole: null,
-        sourceThemeId: null,
-        currentTemplate: templateParam,
-        availableTemplates: TEMPLATE_TYPES,
-        initialData: {
-          template: { sections: {}, order: [] as string[] },
-          header: { sections: {}, order: [] as string[] },
-          footer: { sections: {}, order: [] as string[] },
-        },
-        previewUrl: "/",
-        error: "Session not fully initialized. Please refresh the page.",
-      });
+      console.error('[Editor] No admin or session');
+      return errorResponse("Session not fully initialized. Please refresh the page.");
     }
 
     if (!themeIdParam) {
-      return json({
-        shop: session.shop,
-        themeId: null,
-        themeName: null,
-        themeRole: null,
-        sourceThemeId: null,
-        currentTemplate: templateParam,
-        availableTemplates: TEMPLATE_TYPES,
-        initialData: {
-          template: { sections: {}, order: [] as string[] },
-          header: { sections: {}, order: [] as string[] },
-          footer: { sections: {}, order: [] as string[] },
-        },
-        previewUrl: "/",
-        error: "No theme selected. Please go back and select a theme.",
-      });
+      console.error('[Editor] No theme ID provided');
+      return errorResponse("No theme selected. Please go back and select a theme.");
     }
 
-    // Get theme info
-    const themeInfo = await getThemeById(admin, themeIdParam);
-    if (!themeInfo) {
-      return json({
-        shop: session.shop,
-        themeId: null,
-        themeName: null,
-        themeRole: null,
-        sourceThemeId: null,
-        currentTemplate: templateParam,
-        availableTemplates: TEMPLATE_TYPES,
-        initialData: {
-          template: { sections: {}, order: [] as string[] },
-          header: { sections: {}, order: [] as string[] },
-          footer: { sections: {}, order: [] as string[] },
-        },
-        previewUrl: "/",
-        error: "Theme not found. Please select a different theme.",
-      });
+    // Download theme data using the new comprehensive function
+    console.log('[Editor] Calling downloadThemeForEditor...');
+    const themeData = await downloadThemeForEditor(admin, themeIdParam, templateParam);
+
+    if (!themeData) {
+      console.error('[Editor] downloadThemeForEditor returned null');
+      return errorResponse("Failed to download theme data. Please try again.");
     }
 
-    // Get template path from param
-    const templateConfig = TEMPLATE_TYPES.find(t => t.value === templateParam) || TEMPLATE_TYPES[0];
-
-    // Download theme template and section group data
-    const [templateData, headerGroup, footerGroup] = await Promise.all([
-      getThemeAsset(admin, themeIdParam, templateConfig.path).catch(() => null),
-      getThemeAsset(admin, themeIdParam, "sections/header-group.json").catch(() => null),
-      getThemeAsset(admin, themeIdParam, "sections/footer-group.json").catch(() => null),
-    ]);
-
-    // Parse template data to get sections and order
-    const parsedTemplate = parseTemplateData(templateData);
-    const parsedHeader = parseTemplateData(headerGroup);
-    const parsedFooter = parseTemplateData(footerGroup);
+    console.log('[Editor] Theme downloaded successfully');
+    console.log('[Editor] Theme name:', themeData.theme.name);
+    console.log('[Editor] Template sections:', Object.keys(themeData.template.sections));
+    console.log('[Editor] Header sections:', Object.keys(themeData.header.sections));
+    console.log('[Editor] Footer sections:', Object.keys(themeData.footer.sections));
 
     // Build preview URL based on template type
     let previewPath = "/";
@@ -183,20 +158,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       case "404": previewPath = "/404"; break;
     }
 
-    const previewUrl = `https://${session.shop}${previewPath}?preview_theme_id=${themeIdParam}`;
+    const previewUrl = `https://${session.shop}${previewPath}?preview_theme_id=${themeData.theme.numericId}`;
+    console.log('[Editor] Preview URL:', previewUrl);
 
     return json({
       shop: session.shop,
-      themeId: themeIdParam,
-      themeName: themeInfo.name,
-      themeRole: themeInfo.role,
-      sourceThemeId: themeIdParam,
+      themeId: themeData.theme.numericId,
+      themeName: themeData.theme.name,
+      themeRole: themeData.theme.role,
+      sourceThemeId: themeData.theme.numericId,
       currentTemplate: templateParam,
       availableTemplates: TEMPLATE_TYPES,
       initialData: {
-        template: parsedTemplate,
-        header: parsedHeader,
-        footer: parsedFooter,
+        template: {
+          sections: themeData.template.sections,
+          order: themeData.template.order,
+        },
+        header: {
+          sections: themeData.header.sections,
+          order: themeData.header.order,
+        },
+        footer: {
+          sections: themeData.footer.sections,
+          order: themeData.footer.order,
+        },
       },
       previewUrl,
       error: null,

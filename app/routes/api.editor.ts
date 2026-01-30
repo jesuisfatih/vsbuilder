@@ -1,33 +1,34 @@
 /**
- * 🛡️ EDITOR API ACTIONS
- * Handles all editor save/update operations via Remix actions
+ * 🛡️ EDITOR API ACTIONS - Production Ready
+ * Handles all editor save/update operations
  * Uses GraphQL API for theme operations
  */
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import {
-    downloadThemeData,
+    downloadThemeForEditor,
     getOrCreateDraftTheme,
-    getThemeById,
-    saveThemeAssets
+    saveEditorChanges
 } from "../utils/theme.server";
 
 // ============================================
-// LOADER - Fetch theme data for editor
+// LOADER - Fetch theme data
 // ============================================
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  console.log('[API Editor] Loader called');
+
   try {
     const { admin } = await authenticate.admin(request);
     const url = new URL(request.url);
     const themeId = url.searchParams.get("themeId");
+    const template = url.searchParams.get("template") || "index";
 
     if (!themeId) {
       return json({ error: "Theme ID is required" }, { status: 400 });
     }
 
-    // Download full theme data
-    const themeData = await downloadThemeData(admin, themeId);
+    const themeData = await downloadThemeForEditor(admin, themeId, template);
 
     if (!themeData) {
       return json({ error: "Failed to download theme data" }, { status: 500 });
@@ -36,12 +37,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({
       success: true,
       theme: themeData.theme,
-      templates: themeData.templates,
-      sections: themeData.sections,
-      config: themeData.config
+      template: themeData.template,
+      header: themeData.header,
+      footer: themeData.footer
     });
   } catch (error) {
-    console.error("[Editor API] Loader error:", error);
+    console.error("[API Editor] Loader error:", error);
     return json({
       error: error instanceof Error ? error.message : "Unknown error"
     }, { status: 500 });
@@ -53,18 +54,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 // ============================================
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  console.log('[API Editor] Action called');
+
   try {
     const { admin } = await authenticate.admin(request);
 
     if (!admin) {
-      return json({
-        success: false,
-        error: "Not authenticated"
-      }, { status: 401 });
+      return json({ success: false, error: "Not authenticated" }, { status: 401 });
     }
 
     const formData = await request.formData();
     const actionType = formData.get("_action") as string;
+
+    console.log('[API Editor] Action type:', actionType);
 
     switch (actionType) {
       case "SAVE_AS_DRAFT": {
@@ -74,6 +76,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const footerData = formData.get("footer") as string;
         const currentTemplate = formData.get("currentTemplate") as string || "index";
 
+        console.log('[API Editor] SAVE_AS_DRAFT');
+        console.log('[API Editor] Source Theme ID:', sourceThemeId);
+        console.log('[API Editor] Template:', currentTemplate);
+
         if (!sourceThemeId) {
           return json({ success: false, error: "Source theme ID is required" }, { status: 400 });
         }
@@ -81,39 +87,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Get or create draft theme
         const draftResult = await getOrCreateDraftTheme(admin, sourceThemeId);
         if (!draftResult) {
-          return json({ success: false, error: "Failed to create draft theme" }, { status: 500 });
+          return json({ success: false, error: "Failed to create or find draft theme" }, { status: 500 });
         }
 
-        const { draftId, isNew } = draftResult;
+        console.log('[API Editor] Draft theme:', draftResult.draft.name, '| isNew:', draftResult.isNew);
 
-        // Prepare files to save
-        const filesToSave: Array<{key: string, value: string}> = [];
-
-        if (templateData) {
-          const templatePath = `templates/${currentTemplate}.json`;
-          filesToSave.push({ key: templatePath, value: templateData });
+        // Parse the data
+        let template, header, footer;
+        try {
+          template = templateData ? JSON.parse(templateData) : { sections: {}, order: [] };
+          header = headerData ? JSON.parse(headerData) : { sections: {}, order: [] };
+          footer = footerData ? JSON.parse(footerData) : { sections: {}, order: [] };
+        } catch (parseError) {
+          console.error('[API Editor] JSON parse error:', parseError);
+          return json({ success: false, error: "Invalid JSON data" }, { status: 400 });
         }
 
-        if (headerData) {
-          filesToSave.push({ key: "sections/header-group.json", value: headerData });
-        }
+        // Save changes to draft theme
+        const saveSuccess = await saveEditorChanges(
+          admin,
+          draftResult.draft.id,
+          currentTemplate,
+          template,
+          header,
+          footer
+        );
 
-        if (footerData) {
-          filesToSave.push({ key: "sections/footer-group.json", value: footerData });
+        if (!saveSuccess) {
+          return json({ success: false, error: "Failed to save changes" }, { status: 500 });
         }
-
-        if (filesToSave.length > 0) {
-          await saveThemeAssets(admin, draftId, filesToSave);
-        }
-
-        // Get draft theme info for response
-        const draftTheme = await getThemeById(admin, draftId);
 
         return json({
           success: true,
-          message: isNew ? "Created new draft and saved changes" : "Saved changes to existing draft",
-          draftThemeId: draftId,
-          draftThemeName: draftTheme?.name,
+          message: draftResult.isNew
+            ? `Created new draft "${draftResult.draft.name}" and saved changes`
+            : `Saved changes to "${draftResult.draft.name}"`,
+          draftThemeId: draftResult.draft.numericId,
+          draftThemeName: draftResult.draft.name,
+          isNew: draftResult.isNew,
           savedAt: new Date().toISOString()
         });
       }
@@ -125,31 +136,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const footerData = formData.get("footer") as string;
         const currentTemplate = formData.get("currentTemplate") as string || "index";
 
+        console.log('[API Editor] SAVE_TO_THEME:', themeId);
+
         if (!themeId) {
           return json({ success: false, error: "Theme ID is required" }, { status: 400 });
         }
 
-        // Prepare files to save
-        const filesToSave: Array<{key: string, value: string}> = [];
-
-        if (templateData) {
-          const templatePath = `templates/${currentTemplate}.json`;
-          filesToSave.push({ key: templatePath, value: templateData });
+        let template, header, footer;
+        try {
+          template = templateData ? JSON.parse(templateData) : { sections: {}, order: [] };
+          header = headerData ? JSON.parse(headerData) : { sections: {}, order: [] };
+          footer = footerData ? JSON.parse(footerData) : { sections: {}, order: [] };
+        } catch (parseError) {
+          console.error('[API Editor] JSON parse error:', parseError);
+          return json({ success: false, error: "Invalid JSON data" }, { status: 400 });
         }
 
-        if (headerData) {
-          filesToSave.push({ key: "sections/header-group.json", value: headerData });
-        }
+        const saveSuccess = await saveEditorChanges(
+          admin,
+          themeId,
+          currentTemplate,
+          template,
+          header,
+          footer
+        );
 
-        if (footerData) {
-          filesToSave.push({ key: "sections/footer-group.json", value: footerData });
+        if (!saveSuccess) {
+          return json({ success: false, error: "Failed to save changes" }, { status: 500 });
         }
-
-        if (filesToSave.length === 0) {
-          return json({ success: false, error: "No data to save" }, { status: 400 });
-        }
-
-        await saveThemeAssets(admin, themeId, filesToSave);
 
         return json({
           success: true,
@@ -158,76 +172,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
       }
 
-      case "DOWNLOAD_THEME": {
-        const themeId = formData.get("themeId") as string;
-
-        if (!themeId) {
-          return json({ success: false, error: "Theme ID is required" }, { status: 400 });
-        }
-
-        const themeData = await downloadThemeData(admin, themeId);
-
-        if (!themeData) {
-          return json({ success: false, error: "Failed to download theme" }, { status: 500 });
-        }
-
-        return json({
-          success: true,
-          theme: themeData.theme,
-          templates: themeData.templates,
-          sections: themeData.sections,
-          config: themeData.config
-        });
-      }
-
-      case "CREATE_DRAFT": {
-        const sourceThemeId = formData.get("sourceThemeId") as string;
-
-        if (!sourceThemeId) {
-          return json({ success: false, error: "Source theme ID is required" }, { status: 400 });
-        }
-
-        const draftResult = await getOrCreateDraftTheme(admin, sourceThemeId);
-
-        if (!draftResult) {
-          return json({ success: false, error: "Failed to create draft" }, { status: 500 });
-        }
-
-        const draftTheme = await getThemeById(admin, draftResult.draftId);
-
-        return json({
-          success: true,
-          draftThemeId: draftResult.draftId,
-          draftThemeName: draftTheme?.name,
-          isNew: draftResult.isNew
-        });
-      }
-
-      // Legacy action for backwards compatibility
+      // Legacy compatibility
       case "SAVE_ALL": {
         const themeId = formData.get("themeId") as string;
         const templateData = formData.get("template") as string;
         const headerData = formData.get("header") as string;
         const footerData = formData.get("footer") as string;
 
+        console.log('[API Editor] SAVE_ALL (legacy):', themeId);
+
         if (!themeId) {
           return json({ success: false, error: "Theme ID is required" }, { status: 400 });
         }
 
-        const filesToSave: Array<{key: string, value: string}> = [];
-
-        if (templateData) {
-          filesToSave.push({ key: "templates/index.json", value: templateData });
-        }
-        if (headerData) {
-          filesToSave.push({ key: "sections/header-group.json", value: headerData });
-        }
-        if (footerData) {
-          filesToSave.push({ key: "sections/footer-group.json", value: footerData });
+        let template, header, footer;
+        try {
+          template = templateData ? JSON.parse(templateData) : { sections: {}, order: [] };
+          header = headerData ? JSON.parse(headerData) : { sections: {}, order: [] };
+          footer = footerData ? JSON.parse(footerData) : { sections: {}, order: [] };
+        } catch (parseError) {
+          return json({ success: false, error: "Invalid JSON data" }, { status: 400 });
         }
 
-        if (filesToSave.length > 0) {
-          await saveThemeAssets(admin, themeId, filesToSave);
+        const saveSuccess = await saveEditorChanges(
+          admin,
+          themeId,
+          "index",
+          template,
+          header,
+          footer
+        );
+
+        if (!saveSuccess) {
+          return json({ success: false, error: "Failed to save changes" }, { status: 500 });
         }
 
         return json({
@@ -238,13 +215,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       default:
-        return json({
-          success: false,
-          error: `Unknown action: ${actionType}`
-        }, { status: 400 });
+        return json({ success: false, error: `Unknown action: ${actionType}` }, { status: 400 });
     }
   } catch (error) {
-    console.error("[Editor API] Action error:", error);
+    console.error("[API Editor] Action error:", error);
     return json({
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred"
