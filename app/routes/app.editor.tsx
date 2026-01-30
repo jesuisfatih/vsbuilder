@@ -48,8 +48,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getDefaultSettings,
   SECTION_CATEGORIES,
-  SECTION_TEMPLATES
+  SECTION_TEMPLATES,
 } from "../config/sectionTemplates";
+import {
+  THEME_SETTINGS_SCHEMA,
+  type ThemeSettingInput,
+} from "../config/themeSettings";
 import { authenticate } from "../shopify.server";
 import {
   useEditorStore,
@@ -575,6 +579,251 @@ const SectionPickerModal = ({ isOpen, onClose, groupType }: SectionPickerModalPr
           )}
         </div>
       </motion.div>
+    </div>
+  );
+};
+
+// ============================================
+// THEME SETTINGS PANEL
+// ============================================
+
+const ThemeSettingField = ({
+  setting,
+  value,
+  onChange
+}: {
+  setting: ThemeSettingInput;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) => {
+  const [showColorPicker, setShowColorPicker] = useState(false);
+
+  switch (setting.type) {
+    case "color":
+      return (
+        <div className="editor-setting">
+          <label className="editor-setting__label">{setting.label}</label>
+          <div className="editor-color-picker">
+            <button
+              className="editor-color-picker__trigger"
+              onClick={() => setShowColorPicker(!showColorPicker)}
+            >
+              <span
+                className="editor-color-picker__swatch"
+                style={{ backgroundColor: (value as string) || setting.default as string || "#ffffff" }}
+              />
+              <span className="editor-color-picker__value">
+                {(value as string) || setting.default || "Select color"}
+              </span>
+            </button>
+            {showColorPicker && (
+              <div className="editor-color-picker__popover">
+                <div
+                  className="editor-color-picker__overlay"
+                  onClick={() => setShowColorPicker(false)}
+                />
+                <div className="editor-color-picker__panel">
+                  <div className="editor-color-picker__custom">
+                    <input
+                      type="color"
+                      value={(value as string) || setting.default as string || "#ffffff"}
+                      onChange={(e) => onChange(e.target.value)}
+                      className="editor-color-picker__input"
+                    />
+                    <input
+                      type="text"
+                      value={(value as string) || ""}
+                      onChange={(e) => onChange(e.target.value)}
+                      placeholder="#000000"
+                      className="editor-setting__input"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          {setting.info && <p className="editor-setting__info">{setting.info}</p>}
+        </div>
+      );
+
+    case "range":
+      return (
+        <div className="editor-setting">
+          <div className="editor-setting__row">
+            <label className="editor-setting__label">{setting.label}</label>
+            <span className="editor-setting__value">
+              {value as number ?? setting.default}{setting.unit || ""}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={setting.min}
+            max={setting.max}
+            step={setting.step}
+            value={value as number ?? setting.default}
+            onChange={(e) => onChange(parseInt(e.target.value, 10))}
+            className="editor-setting__range"
+          />
+        </div>
+      );
+
+    case "select":
+      return (
+        <div className="editor-setting">
+          <label className="editor-setting__label">{setting.label}</label>
+          <select
+            value={(value as string) ?? setting.default}
+            onChange={(e) => onChange(e.target.value)}
+            className="editor-setting__select"
+          >
+            {setting.options?.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+
+    case "checkbox":
+      return (
+        <div className="editor-setting">
+          <div className="editor-setting__row">
+            <label className="editor-setting__label">{setting.label}</label>
+            <button
+              className={clsx("editor-switch", (value ?? setting.default) && "editor-switch--checked")}
+              onClick={() => onChange(!(value ?? setting.default))}
+            >
+              <span className="editor-switch__thumb" />
+            </button>
+          </div>
+        </div>
+      );
+
+    case "font_picker":
+      return (
+        <div className="editor-setting">
+          <label className="editor-setting__label">{setting.label}</label>
+          <select
+            value={(value as string) ?? setting.default}
+            onChange={(e) => onChange(e.target.value)}
+            className="editor-setting__select"
+          >
+            {["Assistant", "Inter", "Roboto", "Open Sans", "Lato", "Montserrat", "Playfair Display", "Libre Baskerville", "DM Sans", "Poppins"].map((font) => (
+              <option key={font} value={font}>{font}</option>
+            ))}
+          </select>
+        </div>
+      );
+
+    case "image_picker":
+      const hasImage = typeof value === "string" && value.length > 0;
+      return (
+        <div className="editor-setting">
+          <label className="editor-setting__label">{setting.label}</label>
+          <div className="editor-image-picker">
+            <button
+              className={clsx(
+                "editor-image-picker__trigger",
+                hasImage && "editor-image-picker__trigger--has-image"
+              )}
+              onClick={() => {
+                const url = prompt("Enter image URL:", (value as string) || "");
+                if (url !== null) onChange(url);
+              }}
+            >
+              {hasImage ? (
+                <img src={value as string} alt={setting.label} className="editor-image-picker__preview" />
+              ) : (
+                <div className="editor-image-picker__placeholder">
+                  <PhotoIcon className="editor-image-picker__placeholder-icon" />
+                </div>
+              )}
+              <div className="editor-image-picker__info">
+                {hasImage ? (
+                  <span className="editor-image-picker__filename">{(value as string).split("/").pop()}</span>
+                ) : (
+                  <span className="editor-image-picker__label">Select image</span>
+                )}
+              </div>
+            </button>
+          </div>
+          {setting.info && <p className="editor-setting__info">{setting.info}</p>}
+        </div>
+      );
+
+    default:
+      return (
+        <div className="editor-setting">
+          <label className="editor-setting__label">{setting.label}</label>
+          <input
+            type="text"
+            value={(value as string) ?? setting.default ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+            className="editor-setting__input"
+          />
+          {setting.info && <p className="editor-setting__info">{setting.info}</p>}
+        </div>
+      );
+  }
+};
+
+const ThemeSettingsPanel = () => {
+  const store = useEditorStore();
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(["Colors"]));
+
+  const toggleGroup = (name: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="editor-theme-settings">
+      <header className="editor-sidebar-secondary__header">
+        <h2 className="editor-sidebar-secondary__title">Theme settings</h2>
+      </header>
+
+      <div className="editor-sidebar-secondary__content editor-scrollbar">
+        {THEME_SETTINGS_SCHEMA.map((group) => (
+          <div key={group.name} className="editor-settings-group">
+            <button
+              className={clsx(
+                "editor-settings-group__header",
+                expandedGroups.has(group.name) && "editor-settings-group__header--expanded"
+              )}
+              onClick={() => toggleGroup(group.name)}
+            >
+              <span className="editor-settings-group__title">{group.name}</span>
+              <ChevronDownIcon
+                className={clsx(
+                  "editor-settings-group__chevron",
+                  expandedGroups.has(group.name) && "editor-settings-group__chevron--expanded"
+                )}
+              />
+            </button>
+
+            {expandedGroups.has(group.name) && (
+              <div className="editor-settings-group__content">
+                {group.settings.map((setting) => (
+                  <ThemeSettingField
+                    key={setting.id}
+                    setting={setting}
+                    value={store.themeSettings[setting.id]}
+                    onChange={(value) => store.updateThemeSetting(setting.id, value)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

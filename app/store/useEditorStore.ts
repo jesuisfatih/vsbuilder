@@ -142,11 +142,17 @@ interface EditorState {
   markClean: () => void;
   setSaving: (saving: boolean) => void;
 
+  // Theme Settings
+  themeSettings: Record<string, unknown>;
+  updateThemeSetting: (key: string, value: unknown) => void;
+  setThemeSettings: (settings: Record<string, unknown>) => void;
+
   // Serialization
   getSerializableState: () => {
     template: SectionGroup;
     headerGroup: SectionGroup;
     footerGroup: SectionGroup;
+    themeSettings: Record<string, unknown>;
   };
 }
 
@@ -188,6 +194,7 @@ export const useEditorStore = create<EditorState>()(
       template: { sections: {}, order: [] },
       headerGroup: { sections: {}, order: [] },
       footerGroup: { sections: {}, order: [] },
+      themeSettings: {},
 
       selectedPath: null,
       device: 'desktop',
@@ -644,6 +651,17 @@ export const useEditorStore = create<EditorState>()(
         state.isSaving = saving;
       }),
 
+      // ========== THEME SETTINGS ==========
+
+      updateThemeSetting: (key, value) => set((state) => {
+        state.themeSettings[key] = value;
+        state.isDirty = true;
+      }),
+
+      setThemeSettings: (settings) => set((state) => {
+        state.themeSettings = settings;
+      }),
+
       // ========== SERIALIZATION ==========
 
       getSerializableState: () => {
@@ -652,6 +670,7 @@ export const useEditorStore = create<EditorState>()(
           template: state.template,
           headerGroup: state.headerGroup,
           footerGroup: state.footerGroup,
+          themeSettings: state.themeSettings,
         };
       },
     }))
