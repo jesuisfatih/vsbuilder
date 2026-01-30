@@ -1652,6 +1652,10 @@ export default function Editor() {
   const store = useEditorStore();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  // Detect if running in App Proxy mode (mağaza domain) and use absolute URL for API calls
+  const isProxyMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/proxy/');
+  const apiBase = isProxyMode ? 'https://vsbuilder.techifyboost.com' : '';
+
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
   const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
@@ -1705,19 +1709,19 @@ export default function Editor() {
   // Check if theme is synced locally and sync if needed
   useEffect(() => {
     // Check sync status
-    fetch(`/api/theme-sync?themeId=${themeId}`)
+    fetch(`${apiBase}/api/theme-sync?themeId=${themeId}`)
       .then(res => res.json())
       .then(data => {
         if (data.synced) {
           setThemeSynced(true);
           // Load preview since theme is synced
-          previewFetcher.load(`/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
+          previewFetcher.load(`${apiBase}/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
         } else {
           // Theme not synced, trigger sync
           setSyncing(true);
           syncFetcher.submit(
             { themeId },
-            { method: "POST", action: "/api/theme-sync" }
+            { method: "POST", action: `${apiBase}/api/theme-sync` }
           );
         }
       })
@@ -1732,7 +1736,7 @@ export default function Editor() {
       setThemeSynced(true);
       setSyncing(false);
       // Now load the preview
-      previewFetcher.load(`/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
+      previewFetcher.load(`${apiBase}/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
     }
   }, [syncFetcher.data]);
 
@@ -1803,7 +1807,7 @@ export default function Editor() {
 
       // Add blocks? Advanced topic.
 
-      renderFetcher.load(`/api/render?${params.toString()}`);
+      renderFetcher.load(`${apiBase}/api/render?${params.toString()}`);
     }, 500);
 
     return () => clearTimeout(timer);
@@ -2368,7 +2372,7 @@ export default function Editor() {
                     onClick={() => {
                       setIframeReady(false);
                       // Use local render API
-                      previewFetcher.load(`/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
+                      previewFetcher.load(`${apiBase}/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
                     }}
                     className="editor-preview__refresh"
                     title="Refresh Preview"
