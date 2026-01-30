@@ -202,6 +202,7 @@ export async function getThemeFiles(admin: any, themeId: string, filenames: stri
 
     const nodes = data.data?.theme?.files?.nodes || [];
     console.log('[Theme] Found', nodes.length, 'files');
+    console.log('[Theme] Returned filenames:', nodes.map((n: any) => n.filename));
 
     return nodes.map((node: any) => ({
       filename: node.filename,
