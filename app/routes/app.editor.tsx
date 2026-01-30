@@ -71,14 +71,31 @@ import { getActiveThemeId, getThemeAsset } from "../utils/theme.server";
 // LOADER
 // ============================================
 
+// Available template types
+const TEMPLATE_TYPES = [
+  { value: "index", label: "Home page", path: "templates/index.json" },
+  { value: "product", label: "Product pages", path: "templates/product.json" },
+  { value: "collection", label: "Collection pages", path: "templates/collection.json" },
+  { value: "page", label: "Pages", path: "templates/page.json" },
+  { value: "blog", label: "Blog", path: "templates/blog.json" },
+  { value: "article", label: "Article", path: "templates/article.json" },
+  { value: "cart", label: "Cart", path: "templates/cart.json" },
+  { value: "search", label: "Search results", path: "templates/search.json" },
+  { value: "404", label: "404 page", path: "templates/404.json" },
+];
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { admin, session } = await authenticate.admin(request);
+    const url = new URL(request.url);
+    const templateParam = url.searchParams.get("template") || "index";
 
     if (!admin || !session) {
       return json({
         shop: "demo-shop",
         themeId: null,
+        currentTemplate: templateParam,
+        availableTemplates: TEMPLATE_TYPES,
         initialData: {
           template: { sections: {}, order: [] },
           header: { sections: {}, order: [] },
@@ -94,6 +111,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       return json({
         shop: session.shop,
         themeId: null,
+        currentTemplate: templateParam,
+        availableTemplates: TEMPLATE_TYPES,
         initialData: {
           template: { sections: {}, order: [] },
           header: { sections: {}, order: [] },
@@ -104,21 +123,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
 
-    const [indexTemplate, headerGroup, footerGroup] = await Promise.all([
-      getThemeAsset(admin, themeId.toString(), "templates/index.json"),
+    // Get template path from param
+    const templateConfig = TEMPLATE_TYPES.find(t => t.value === templateParam) || TEMPLATE_TYPES[0];
+
+    const [templateData, headerGroup, footerGroup] = await Promise.all([
+      getThemeAsset(admin, themeId.toString(), templateConfig.path).catch(() => null),
       getThemeAsset(admin, themeId.toString(), "sections/header-group.json").catch(() => null),
       getThemeAsset(admin, themeId.toString(), "sections/footer-group.json").catch(() => null),
     ]);
 
-    // Build preview URL
-    const shopDomain = session.shop.replace(".myshopify.com", "");
-    const previewUrl = `https://${session.shop}/?preview_theme_id=${themeId}`;
+    // Build preview URL based on template type
+    let previewPath = "/";
+    switch (templateParam) {
+      case "product": previewPath = "/products"; break;
+      case "collection": previewPath = "/collections/all"; break;
+      case "page": previewPath = "/pages"; break;
+      case "blog": previewPath = "/blogs/news"; break;
+      case "article": previewPath = "/blogs/news"; break;
+      case "cart": previewPath = "/cart"; break;
+      case "search": previewPath = "/search"; break;
+      case "404": previewPath = "/404"; break;
+    }
+
+    const previewUrl = `https://${session.shop}${previewPath}?preview_theme_id=${themeId}`;
 
     return json({
       shop: session.shop,
       themeId: themeId.toString(),
+      currentTemplate: templateParam,
+      availableTemplates: TEMPLATE_TYPES,
       initialData: {
-        template: indexTemplate || { sections: {}, order: [] },
+        template: templateData || { sections: {}, order: [] },
         header: headerGroup || { sections: {}, order: [] },
         footer: footerGroup || { sections: {}, order: [] },
       },
@@ -129,6 +164,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({
       shop: "demo-shop",
       themeId: null,
+      currentTemplate: "index",
+      availableTemplates: TEMPLATE_TYPES,
       initialData: {
         template: { sections: {}, order: [] },
         header: { sections: {}, order: [] },
@@ -1566,7 +1603,7 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
 // ============================================
 
 export default function Editor() {
-  const { initialData, shop, themeId, previewUrl } = useLoaderData<typeof loader>();
+  const { initialData, shop, themeId, previewUrl, currentTemplate, availableTemplates } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const fetcher = useFetcher();
   const store = useEditorStore();
@@ -1574,6 +1611,16 @@ export default function Editor() {
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
+  const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
+
+  // Get current template label
+  const currentTemplateLabel = availableTemplates?.find((t: { value: string; label: string }) => t.value === currentTemplate)?.label || "Home page";
+
+  // Handle template change
+  const handleTemplateChange = (templateValue: string) => {
+    setShowTemplateDropdown(false);
+    navigate(`/app/editor?template=${templateValue}`);
+  };
 
   // DnD Sensors
   const sensors = useSensors(
@@ -1887,7 +1934,38 @@ export default function Editor() {
           {/* SIDEBAR */}
           <aside className="editor-sidebar">
             <header className="editor-sidebar__header">
-              <h1 className="editor-sidebar__template-title">Home page</h1>
+              <div className="editor-template-selector">
+                <button
+                  className="editor-template-selector__trigger"
+                  onClick={() => setShowTemplateDropdown(!showTemplateDropdown)}
+                >
+                  <span className="editor-template-selector__label">{currentTemplateLabel}</span>
+                  <ChevronDownIcon className="editor-template-selector__icon" />
+                </button>
+                {showTemplateDropdown && (
+                  <div className="editor-template-selector__dropdown">
+                    <div className="editor-template-selector__overlay" onClick={() => setShowTemplateDropdown(false)} />
+                    <ul className="editor-template-selector__list">
+                      {availableTemplates?.map((template: { value: string; label: string; path: string }) => (
+                        <li key={template.value}>
+                          <button
+                            className={clsx(
+                              "editor-template-selector__item",
+                              currentTemplate === template.value && "editor-template-selector__item--active"
+                            )}
+                            onClick={() => handleTemplateChange(template.value)}
+                          >
+                            {template.label}
+                            {currentTemplate === template.value && (
+                              <CheckIcon className="w-4 h-4" />
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
             </header>
 
             <div className="editor-sidebar__content editor-scrollbar">

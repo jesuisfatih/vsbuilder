@@ -2408,3 +2408,101 @@
 .editor-sidebar-search__input::placeholder {
   color: var(--p-color-text-secondary);
 }
+
+/* ===== TIER 2: TEMPLATE SELECTOR ===== */
+.editor-template-selector {
+  position: relative;
+  width: 100%;
+}
+
+.editor-template-selector__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--p-space-200) var(--p-space-300);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background var(--p-motion-duration-100) var(--p-motion-ease);
+  border-radius: var(--p-border-radius-150);
+}
+
+.editor-template-selector__trigger:hover {
+  background: var(--p-color-bg-surface-hover);
+}
+
+.editor-template-selector__label {
+  font-size: var(--p-font-size-400);
+  font-weight: var(--p-font-weight-semibold);
+  color: var(--p-color-text);
+}
+
+.editor-template-selector__icon {
+  width: 1rem;
+  height: 1rem;
+  color: var(--p-color-icon);
+  transition: transform var(--p-motion-duration-100) var(--p-motion-ease);
+}
+
+.editor-template-selector__trigger[aria-expanded="true"] .editor-template-selector__icon {
+  transform: rotate(180deg);
+}
+
+.editor-template-selector__dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: var(--p-space-100);
+}
+
+.editor-template-selector__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+}
+
+.editor-template-selector__list {
+  background: var(--p-color-bg-surface);
+  border: 1px solid var(--p-color-border);
+  border-radius: var(--p-border-radius-200);
+  box-shadow: var(--p-shadow-300);
+  overflow: hidden;
+  list-style: none;
+  padding: var(--p-space-100);
+  margin: 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.editor-template-selector__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--p-space-200) var(--p-space-300);
+  background: transparent;
+  border: none;
+  border-radius: var(--p-border-radius-100);
+  font-size: var(--p-font-size-325);
+  color: var(--p-color-text);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--p-motion-duration-100) var(--p-motion-ease);
+}
+
+.editor-template-selector__item:hover {
+  background: var(--p-color-bg-surface-hover);
+}
+
+.editor-template-selector__item--active {
+  background: var(--p-color-bg-surface-selected);
+  color: var(--p-color-text-emphasis);
+  font-weight: var(--p-font-weight-medium);
+}
+
+.editor-template-selector__item--active:hover {
+  background: var(--p-color-bg-surface-selected-hover);
+}
