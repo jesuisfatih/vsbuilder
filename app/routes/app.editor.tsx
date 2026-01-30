@@ -32,10 +32,12 @@ import {
   DevicePhoneMobileIcon,
   EyeIcon,
   EyeSlashIcon,
+  MagnifyingGlassIcon,
   PlusCircleIcon,
   Square3Stack3DIcon,
   Squares2X2Icon,
   TrashIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
@@ -395,41 +397,194 @@ interface SectionGroupProps {
 
 const SectionGroup = ({ groupType, label, sections, order }: SectionGroupProps) => {
   const store = useEditorStore();
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
-    <div className="editor-section-group">
-      <div className="editor-section-group__label">{label}</div>
-      <SortableContext items={order} strategy={verticalListSortingStrategy}>
-        <ul className="editor-navlist">
-          {order.map((id) => {
-            const section = sections[id];
-            if (!section) return null;
+    <>
+      <div className="editor-section-group">
+        <div className="editor-section-group__label">{label}</div>
+        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+          <ul className="editor-navlist">
+            {order.map((id) => {
+              const section = sections[id];
+              if (!section) return null;
 
-            const hasBlocks = !!(section.blocks && Object.keys(section.blocks).length > 0);
+              const hasBlocks = !!(section.blocks && Object.keys(section.blocks).length > 0);
 
-            return (
-              <SortableNavItem
-                key={id}
-                id={id}
-                section={section}
-                groupType={groupType}
-                isSelected={store.selectedPath?.sectionId === id && !store.selectedPath?.blockId}
-                isExpanded={store.expandedSections.has(id)}
-                hasBlocks={hasBlocks}
-              />
-            );
-          })}
-          <li>
+              return (
+                <SortableNavItem
+                  key={id}
+                  id={id}
+                  section={section}
+                  groupType={groupType}
+                  isSelected={store.selectedPath?.sectionId === id && !store.selectedPath?.blockId}
+                  isExpanded={store.expandedSections.has(id)}
+                  hasBlocks={hasBlocks}
+                />
+              );
+            })}
+            <li>
+              <button
+                className="editor-add-section-btn"
+                onClick={() => setIsModalOpen(true)}
+              >
+                <PlusCircleIcon className="editor-icon--md" />
+                <span>Add section</span>
+              </button>
+            </li>
+          </ul>
+        </SortableContext>
+      </div>
+
+      <AnimatePresence>
+        {isModalOpen && (
+          <SectionPickerModal
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            groupType={groupType}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+};
+
+// ============================================
+// SECTION PICKER MODAL
+// ============================================
+
+const SECTION_TEMPLATES = [
+  { type: "hero-banner", name: "Hero Banner", category: "Featured" },
+  { type: "featured-collection", name: "Featured Collection", category: "Featured" },
+  { type: "featured-product", name: "Featured Product", category: "Featured" },
+  { type: "slideshow", name: "Slideshow", category: "Featured" },
+  { type: "rich-text", name: "Rich Text", category: "Text" },
+  { type: "text-columns", name: "Text Columns with Images", category: "Text" },
+  { type: "newsletter", name: "Newsletter", category: "Text" },
+  { type: "image-with-text", name: "Image with Text", category: "Image" },
+  { type: "image-banner", name: "Image Banner", category: "Image" },
+  { type: "gallery", name: "Gallery", category: "Image" },
+  { type: "logo-list", name: "Logo List", category: "Image" },
+  { type: "collection-list", name: "Collection List", category: "Collection" },
+  { type: "products-grid", name: "Products Grid", category: "Collection" },
+  { type: "collapsible-content", name: "Collapsible Content", category: "Interactive" },
+  { type: "contact-form", name: "Contact Form", category: "Interactive" },
+  { type: "video", name: "Video", category: "Media" },
+  { type: "custom-liquid", name: "Custom Liquid", category: "Advanced" },
+  { type: "custom-html", name: "Custom HTML", category: "Advanced" },
+];
+
+const CATEGORIES = [...new Set(SECTION_TEMPLATES.map((s) => s.category))];
+
+interface SectionPickerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  groupType: GroupType;
+}
+
+const SectionPickerModal = ({ isOpen, onClose, groupType }: SectionPickerModalProps) => {
+  const store = useEditorStore();
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+  const filteredSections = SECTION_TEMPLATES.filter((section) => {
+    const matchesSearch = section.name.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = !activeCategory || section.category === activeCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  const handleSelect = (sectionType: string) => {
+    store.addSection(groupType, sectionType);
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="editor-modal-overlay" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className="editor-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <header className="editor-modal__header">
+          <h2 className="editor-modal__title">Add section</h2>
+          <button className="editor-modal__close" onClick={onClose}>
+            <XMarkIcon className="editor-icon--sm" />
+          </button>
+        </header>
+
+        {/* Search */}
+        <div className="editor-modal__search">
+          <div className="editor-search-input">
+            <MagnifyingGlassIcon className="editor-search-input__icon" />
+            <input
+              type="text"
+              placeholder="Search sections..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="editor-search-input__field"
+              autoFocus
+            />
+          </div>
+        </div>
+
+        {/* Categories */}
+        <div className="editor-modal__categories">
+          <button
+            className={clsx(
+              "editor-category-btn",
+              !activeCategory && "editor-category-btn--active"
+            )}
+            onClick={() => setActiveCategory(null)}
+          >
+            All
+          </button>
+          {CATEGORIES.map((cat) => (
             <button
-              className="editor-add-section-btn"
-              onClick={() => store.addSection(groupType, "custom-section")}
+              key={cat}
+              className={clsx(
+                "editor-category-btn",
+                activeCategory === cat && "editor-category-btn--active"
+              )}
+              onClick={() => setActiveCategory(cat)}
             >
-              <PlusCircleIcon className="w-5 h-5" />
-              <span>Add section</span>
+              {cat}
             </button>
-          </li>
-        </ul>
-      </SortableContext>
+          ))}
+        </div>
+
+        {/* Sections Grid */}
+        <div className="editor-modal__content editor-scrollbar">
+          <div className="editor-section-grid">
+            {filteredSections.map((section) => (
+              <button
+                key={section.type}
+                className="editor-section-card"
+                onClick={() => handleSelect(section.type)}
+              >
+                <div className="editor-section-card__preview">
+                  <Square3Stack3DIcon className="editor-section-card__icon" />
+                </div>
+                <div className="editor-section-card__info">
+                  <span className="editor-section-card__name">{section.name}</span>
+                  <span className="editor-section-card__category">{section.category}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {filteredSections.length === 0 && (
+            <div className="editor-empty-state">
+              <p className="editor-empty-text">No sections found</p>
+            </div>
+          )}
+        </div>
+      </motion.div>
     </div>
   );
 };
