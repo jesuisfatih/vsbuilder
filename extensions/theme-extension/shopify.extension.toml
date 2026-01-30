@@ -1,6 +1,7 @@
 api_version = "2024-07"
 
 [[extensions]]
+uid = "efca9be1-9978-de57-0019-13dbeaa00877680df8cd"
 type = "theme_app_extension"
 name = "VSBuilder Editor"
 handle = "vsbuilder-editor"
