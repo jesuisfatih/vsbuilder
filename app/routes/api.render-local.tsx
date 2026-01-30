@@ -128,11 +128,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       html += editorScript;
     }
 
-    return new Response(html, {
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-      },
-    });
+    // Return as JSON for useFetcher compatibility
+    return json({ html, success: true });
   } catch (error) {
     console.error("Theme render error:", error);
     return json({
