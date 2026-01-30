@@ -104,6 +104,12 @@ export class ShopifyLiquidEngine {
     this.loadLocales();
   }
 
+  // Sanitize path to prevent directory traversal
+  private sanitizePath(name: string): string {
+    // Remove path traversal attempts
+    return name.replace(/\.\./g, "").replace(/[\\/]/g, "").replace(/^\.*/, "");
+  }
+
   // Load locale files for translations
   private loadLocales() {
     const localesDir = path.join(this.themeDir, "locales");
@@ -229,6 +235,13 @@ export class ShopifyLiquidEngine {
         const match = args.match(/['"]([^'"]+)['"]/);
         this.snippetName = match ? match[1] : args.split(/\s|,/)[0].replace(/['"]/g, "");
 
+        // Check for "for" syntax: {% render 'snippet' for array as item %}
+        this.forLoop = null;
+        const forMatch = args.match(/for\s+([\w.]+)\s+as\s+(\w+)/);
+        if (forMatch) {
+          this.forLoop = { arrayExpr: forMatch[1], itemVar: forMatch[2] };
+        }
+
         // Parse variable assignments (key: value pairs)
         this.assignments = [];
         const assignRegex = /(\w+)\s*:\s*([^,]+)/g;
@@ -239,33 +252,64 @@ export class ShopifyLiquidEngine {
       },
       async render(scope: any) {
         try {
-          const snippetPath = path.join(self.themeDir, "snippets", `${this.snippetName}.liquid`);
-          if (fs.existsSync(snippetPath)) {
-            const snippetContent = fs.readFileSync(snippetPath, "utf-8");
-            const parentContext = scope.getAll();
-            const resolvedAssignments: Record<string, any> = {};
+          // Sanitize snippet name to prevent path traversal
+          const safeName = self.sanitizePath(this.snippetName);
+          const snippetPath = path.join(self.themeDir, "snippets", `${safeName}.liquid`);
 
-            // Resolve variables from scope
-            for (const { key, valueExpr } of this.assignments) {
-              // Check if it's a quoted string literal
-              if ((valueExpr.startsWith("'") && valueExpr.endsWith("'")) ||
-                  (valueExpr.startsWith('"') && valueExpr.endsWith('"'))) {
-                resolvedAssignments[key] = valueExpr.slice(1, -1);
-              } else {
-                // Try to resolve from scope (supports dot notation like product.title)
-                const parts = valueExpr.split(".");
-                let value: any = parentContext;
-                for (const part of parts) {
-                  value = value?.[part];
-                }
-                resolvedAssignments[key] = value !== undefined ? value : valueExpr;
-              }
-            }
-
-            const context = { ...parentContext, ...resolvedAssignments };
-            return await self.engine.parseAndRender(snippetContent, context);
+          if (!fs.existsSync(snippetPath)) {
+            return `<!-- Snippet not found: ${safeName} -->`;
           }
-          return `<!-- Snippet not found: ${this.snippetName} -->`;
+
+          const snippetContent = fs.readFileSync(snippetPath, "utf-8");
+          const parentContext = scope.getAll();
+
+          // Resolve variable assignments
+          const resolvedAssignments: Record<string, any> = {};
+          for (const { key, valueExpr } of this.assignments) {
+            if ((valueExpr.startsWith("'") && valueExpr.endsWith("'")) ||
+                (valueExpr.startsWith('"') && valueExpr.endsWith('"'))) {
+              resolvedAssignments[key] = valueExpr.slice(1, -1);
+            } else {
+              const parts = valueExpr.split(".");
+              let value: any = parentContext;
+              for (const part of parts) {
+                value = value?.[part];
+              }
+              resolvedAssignments[key] = value !== undefined ? value : valueExpr;
+            }
+          }
+
+          // Handle "for" loop syntax
+          if (this.forLoop) {
+            const parts = this.forLoop.arrayExpr.split(".");
+            let array: any = parentContext;
+            for (const part of parts) {
+              array = array?.[part];
+            }
+            if (!Array.isArray(array)) array = [];
+
+            let result = "";
+            for (let i = 0; i < array.length; i++) {
+              const itemContext = {
+                ...resolvedAssignments,
+                [this.forLoop.itemVar]: array[i],
+                forloop: {
+                  index: i + 1,
+                  index0: i,
+                  first: i === 0,
+                  last: i === array.length - 1,
+                  length: array.length,
+                  rindex: array.length - i,
+                  rindex0: array.length - i - 1,
+                },
+              };
+              result += await self.engine.parseAndRender(snippetContent, itemContext);
+            }
+            return result;
+          }
+
+          // Shopify render creates isolated scope - only explicit variables passed
+          return await self.engine.parseAndRender(snippetContent, resolvedAssignments);
         } catch (error) {
           console.error(`Error rendering snippet ${this.snippetName}:`, error);
           return `<!-- Snippet Error: ${this.snippetName} -->`;
@@ -365,16 +409,17 @@ export class ShopifyLiquidEngine {
         this.liquidContent = tagToken.args || "";
       },
       async render(scope: any) {
-        // Process each line as liquid code
+        // Build complete liquid template from all lines
         const lines = this.liquidContent.split(/\r?\n/);
-        let result = "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed) {
-            result += await self.engine.parseAndRender(`{% ${trimmed} %}`, scope.getAll());
-          }
-        }
-        return result;
+        const template = lines
+          .map((line: string) => line.trim())
+          .filter((line: string) => line)
+          .map((line: string) => `{% ${line} %}`)
+          .join("\n");
+
+        // Render all at once to preserve state between lines
+        if (!template) return "";
+        return await self.engine.parseAndRender(template, scope.getAll());
       },
     });
 
@@ -423,8 +468,11 @@ export class ShopifyLiquidEngine {
         }
       },
       async render(scope: any) {
-        const rendered = await self.engine.parseAndRender(this.captureContent, scope.getAll());
-        scope.environments[this.varName] = rendered;
+        const ctx = scope.getAll();
+        const rendered = await self.engine.parseAndRender(this.captureContent, ctx);
+        // Set in scope bottom (global context)
+        const bottom = scope.bottom?.() || scope.environments || ctx;
+        bottom[this.varName] = rendered;
         return "";
       },
     });
@@ -435,12 +483,13 @@ export class ShopifyLiquidEngine {
         this.varName = tagToken.args.trim();
       },
       render(scope: any) {
-        const env = scope.environments;
-        if (env[this.varName] === undefined) {
-          env[this.varName] = 0;
+        const ctx = scope.getAll();
+        const bottom = scope.bottom?.() || scope.environments || ctx;
+        if (bottom[this.varName] === undefined) {
+          bottom[this.varName] = 0;
         }
-        const value = env[this.varName];
-        env[this.varName]++;
+        const value = bottom[this.varName];
+        bottom[this.varName]++;
         return String(value);
       },
     });
@@ -451,12 +500,13 @@ export class ShopifyLiquidEngine {
         this.varName = tagToken.args.trim();
       },
       render(scope: any) {
-        const env = scope.environments;
-        if (env[this.varName] === undefined) {
-          env[this.varName] = 0;
+        const ctx = scope.getAll();
+        const bottom = scope.bottom?.() || scope.environments || ctx;
+        if (bottom[this.varName] === undefined) {
+          bottom[this.varName] = 0;
         }
-        env[this.varName]--;
-        return String(env[this.varName]);
+        bottom[this.varName]--;
+        return String(bottom[this.varName]);
       },
     });
 
@@ -467,6 +517,153 @@ export class ShopifyLiquidEngine {
       },
       async render(scope: any) {
         return await self.engine.parseAndRender(`{{ ${this.expression} }}`, scope.getAll());
+      },
+    });
+
+    // {% tablerow item in array cols:2 %} ... {% endtablerow %}
+    this.engine.registerTag("tablerow", {
+      parse(tagToken: any, remainTokens: any[]) {
+        // Parse: item in array cols:N limit:N offset:N
+        const args = tagToken.args.trim();
+        const match = args.match(/(\w+)\s+in\s+([\w.]+)/);
+        this.itemVar = match ? match[1] : "item";
+        this.arrayExpr = match ? match[2] : "";
+        this.cols = 0;
+        this.limit = 0;
+        this.offset = 0;
+
+        const colsMatch = args.match(/cols:\s*(\d+)/);
+        if (colsMatch) this.cols = parseInt(colsMatch[1], 10);
+
+        const limitMatch = args.match(/limit:\s*(\d+)/);
+        if (limitMatch) this.limit = parseInt(limitMatch[1], 10);
+
+        const offsetMatch = args.match(/offset:\s*(\d+)/);
+        if (offsetMatch) this.offset = parseInt(offsetMatch[1], 10);
+
+        this.rowContent = "";
+        let level = 1;
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "tablerow") level++;
+          if (token.name === "endtablerow") {
+            level--;
+            if (level === 0) break;
+          }
+          this.rowContent += token.raw || token.getText?.() || "";
+        }
+      },
+      async render(scope: any) {
+        const ctx = scope.getAll();
+        const parts = this.arrayExpr.split(".");
+        let array: any = ctx;
+        for (const part of parts) {
+          array = array?.[part];
+        }
+        if (!Array.isArray(array)) return "";
+
+        // Apply offset and limit
+        let items = array.slice(this.offset || 0);
+        if (this.limit > 0) items = items.slice(0, this.limit);
+
+        const cols = this.cols || items.length;
+        let result = "";
+
+        for (let i = 0; i < items.length; i++) {
+          const col = (i % cols) + 1;
+          const row = Math.floor(i / cols) + 1;
+
+          if (col === 1) {
+            result += `<tr class="row${row}">`;
+          }
+
+          result += `<td class="col${col}">`;
+
+          const itemCtx = {
+            ...ctx,
+            [this.itemVar]: items[i],
+            tablerowloop: {
+              length: items.length,
+              index: i + 1,
+              index0: i,
+              rindex: items.length - i,
+              rindex0: items.length - i - 1,
+              first: i === 0,
+              last: i === items.length - 1,
+              col: col,
+              col0: col - 1,
+              col_first: col === 1,
+              col_last: col === cols || i === items.length - 1,
+              row: row,
+            },
+          };
+
+          result += await self.engine.parseAndRender(this.rowContent, itemCtx);
+          result += "</td>";
+
+          if (col === cols || i === items.length - 1) {
+            result += "</tr>";
+          }
+        }
+
+        return result;
+      },
+    });
+
+    // {% cycle 'a', 'b', 'c' %} or {% cycle 'group': 'a', 'b' %}
+    this.engine.registerTag("cycle", {
+      parse(tagToken: any) {
+        const args = tagToken.args.trim();
+        // Check for named group: 'group': 'a', 'b'
+        const namedMatch = args.match(/^['"]([^'"]+)['"]:\s*(.+)$/);
+        if (namedMatch) {
+          this.groupName = namedMatch[1];
+          this.values = namedMatch[2].split(",").map((v: string) => v.trim().replace(/^['"]|['"]$/g, ""));
+        } else {
+          this.groupName = args;
+          this.values = args.split(",").map((v: string) => v.trim().replace(/^['"]|['"]$/g, ""));
+        }
+      },
+      render(scope: any) {
+        const ctx = scope.getAll();
+        const bottom = scope.bottom?.() || scope.environments || ctx;
+
+        // Track cycle position per group
+        if (!bottom.__cycles__) bottom.__cycles__ = {};
+        if (bottom.__cycles__[this.groupName] === undefined) {
+          bottom.__cycles__[this.groupName] = 0;
+        }
+
+        const idx = bottom.__cycles__[this.groupName] % this.values.length;
+        bottom.__cycles__[this.groupName]++;
+
+        return this.values[idx];
+      },
+    });
+
+    // {% include 'snippet' %} - deprecated but still used in legacy themes
+    this.engine.registerTag("include", {
+      parse(tagToken: any) {
+        const args = tagToken.args.trim();
+        const match = args.match(/['"]([^'"]+)['"]/);
+        this.snippetName = match ? match[1] : args.split(/\s|,/)[0].replace(/['"]/g, "");
+      },
+      async render(scope: any) {
+        try {
+          const safeName = self.sanitizePath(this.snippetName);
+          const snippetPath = path.join(self.themeDir, "snippets", `${safeName}.liquid`);
+
+          if (!fs.existsSync(snippetPath)) {
+            return `<!-- Include not found: ${safeName} -->`;
+          }
+
+          const snippetContent = fs.readFileSync(snippetPath, "utf-8");
+          // Include passes parent scope (unlike render which isolates)
+          return await self.engine.parseAndRender(snippetContent, scope.getAll());
+        } catch (error) {
+          console.error(`Error including snippet ${this.snippetName}:`, error);
+          return `<!-- Include Error: ${this.snippetName} -->`;
+        }
       },
     });
   }
@@ -485,6 +682,219 @@ export class ShopifyLiquidEngine {
 
     this.engine.registerFilter("asset_img_url", (asset: string, size?: string) => {
       return `/theme-assets/${asset}`;
+    });
+
+    // String filters
+    this.engine.registerFilter("append", (str: string, suffix: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return str + (suffix ?? "");
+    });
+
+    this.engine.registerFilter("prepend", (str: string, prefix: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return (prefix ?? "") + str;
+    });
+
+    this.engine.registerFilter("remove", (str: string, substr: string) => {
+      if (typeof str !== "string") return str;
+      return str.split(substr).join("");
+    });
+
+    this.engine.registerFilter("remove_first", (str: string, substr: string) => {
+      if (typeof str !== "string") return str;
+      return str.replace(substr, "");
+    });
+
+    this.engine.registerFilter("remove_last", (str: string, substr: string) => {
+      if (typeof str !== "string") return str;
+      const idx = str.lastIndexOf(substr);
+      return idx === -1 ? str : str.slice(0, idx) + str.slice(idx + substr.length);
+    });
+
+    this.engine.registerFilter("replace", (str: string, substr: string, newVal: string) => {
+      if (typeof str !== "string") return str;
+      return str.split(substr).join(newVal ?? "");
+    });
+
+    this.engine.registerFilter("replace_first", (str: string, substr: string, newVal: string) => {
+      if (typeof str !== "string") return str;
+      return str.replace(substr, newVal ?? "");
+    });
+
+    this.engine.registerFilter("strip", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.trim();
+    });
+
+    this.engine.registerFilter("lstrip", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.trimStart();
+    });
+
+    this.engine.registerFilter("rstrip", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.trimEnd();
+    });
+
+    this.engine.registerFilter("strip_html", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.replace(/<[^>]*>/g, "");
+    });
+
+    this.engine.registerFilter("strip_newlines", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.replace(/\r?\n/g, "");
+    });
+
+    this.engine.registerFilter("newline_to_br", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.replace(/\r?\n/g, "<br>");
+    });
+
+    this.engine.registerFilter("escape", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    });
+
+    this.engine.registerFilter("escape_once", (str: string) => {
+      if (typeof str !== "string") return str;
+      // Unescape then escape to avoid double-escaping
+      return str
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    });
+
+    this.engine.registerFilter("truncate", (str: string, length?: number, ellipsis?: string) => {
+      if (typeof str !== "string") return str;
+      const len = length ?? 50;
+      const end = ellipsis ?? "...";
+      return str.length > len ? str.slice(0, len - end.length) + end : str;
+    });
+
+    this.engine.registerFilter("truncatewords", (str: string, count?: number, ellipsis?: string) => {
+      if (typeof str !== "string") return str;
+      const words = str.split(/\s+/);
+      const num = count ?? 15;
+      const end = ellipsis ?? "...";
+      return words.length > num ? words.slice(0, num).join(" ") + end : str;
+    });
+
+    this.engine.registerFilter("url_encode", (str: string) => {
+      if (typeof str !== "string") return str;
+      return encodeURIComponent(str);
+    });
+
+    this.engine.registerFilter("url_decode", (str: string) => {
+      if (typeof str !== "string") return str;
+      return decodeURIComponent(str);
+    });
+
+    this.engine.registerFilter("base64_encode", (str: string) => {
+      if (typeof str !== "string") return str;
+      return Buffer.from(str).toString("base64");
+    });
+
+    this.engine.registerFilter("base64_decode", (str: string) => {
+      if (typeof str !== "string") return str;
+      return Buffer.from(str, "base64").toString("utf-8");
+    });
+
+    this.engine.registerFilter("split", (str: string, delimiter: string) => {
+      if (typeof str !== "string") return [];
+      return str.split(delimiter ?? " ");
+    });
+
+    this.engine.registerFilter("slice", (str: string, start: number, length?: number) => {
+      if (typeof str !== "string" && !Array.isArray(str)) return str;
+      return length !== undefined ? str.slice(start, start + length) : str.slice(start);
+    });
+
+    this.engine.registerFilter("upcase", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.toUpperCase();
+    });
+
+    this.engine.registerFilter("downcase", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.toLowerCase();
+    });
+
+    this.engine.registerFilter("capitalize", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    });
+
+    // Math filters
+    this.engine.registerFilter("abs", (num: number) => Math.abs(Number(num) || 0));
+    this.engine.registerFilter("ceil", (num: number) => Math.ceil(Number(num) || 0));
+    this.engine.registerFilter("floor", (num: number) => Math.floor(Number(num) || 0));
+    this.engine.registerFilter("round", (num: number, decimals?: number) => {
+      const n = Number(num) || 0;
+      const d = decimals ?? 0;
+      return Math.round(n * Math.pow(10, d)) / Math.pow(10, d);
+    });
+    this.engine.registerFilter("plus", (num: number, add: number) => (Number(num) || 0) + (Number(add) || 0));
+    this.engine.registerFilter("minus", (num: number, sub: number) => (Number(num) || 0) - (Number(sub) || 0));
+    this.engine.registerFilter("times", (num: number, mult: number) => (Number(num) || 0) * (Number(mult) || 0));
+    this.engine.registerFilter("divided_by", (num: number, div: number) => {
+      const d = Number(div) || 1;
+      return Math.floor((Number(num) || 0) / d);
+    });
+    this.engine.registerFilter("modulo", (num: number, mod: number) => (Number(num) || 0) % (Number(mod) || 1));
+    this.engine.registerFilter("at_least", (num: number, min: number) => Math.max(Number(num) || 0, Number(min) || 0));
+    this.engine.registerFilter("at_most", (num: number, max: number) => Math.min(Number(num) || 0, Number(max) || 0));
+
+    // Array basic filters
+    this.engine.registerFilter("first", (arr: any[]) => Array.isArray(arr) ? arr[0] : arr);
+    this.engine.registerFilter("last", (arr: any[]) => Array.isArray(arr) ? arr[arr.length - 1] : arr);
+    this.engine.registerFilter("size", (val: any) => {
+      if (Array.isArray(val)) return val.length;
+      if (typeof val === "string") return val.length;
+      if (val && typeof val === "object") return Object.keys(val).length;
+      return 0;
+    });
+    this.engine.registerFilter("join", (arr: any[], separator?: string) => {
+      if (!Array.isArray(arr)) return arr;
+      return arr.join(separator ?? " ");
+    });
+    this.engine.registerFilter("reverse", (arr: any[]) => {
+      if (!Array.isArray(arr)) return arr;
+      return [...arr].reverse();
+    });
+    this.engine.registerFilter("concat", (arr: any[], other: any[]) => {
+      if (!Array.isArray(arr)) return arr;
+      return arr.concat(other || []);
+    });
+
+    // Date filter (basic implementation)
+    this.engine.registerFilter("date", (dateVal: any, format?: string) => {
+      const date = dateVal === "now" ? new Date() : new Date(dateVal);
+      if (isNaN(date.getTime())) return dateVal;
+      const fmt = format || "%Y-%m-%d";
+      return fmt
+        .replace("%Y", String(date.getFullYear()))
+        .replace("%m", String(date.getMonth() + 1).padStart(2, "0"))
+        .replace("%d", String(date.getDate()).padStart(2, "0"))
+        .replace("%H", String(date.getHours()).padStart(2, "0"))
+        .replace("%M", String(date.getMinutes()).padStart(2, "0"))
+        .replace("%S", String(date.getSeconds()).padStart(2, "0"))
+        .replace("%B", date.toLocaleString("en", { month: "long" }))
+        .replace("%b", date.toLocaleString("en", { month: "short" }))
+        .replace("%A", date.toLocaleString("en", { weekday: "long" }))
+        .replace("%a", date.toLocaleString("en", { weekday: "short" }));
+    });
+
+    // Default filter
+    this.engine.registerFilter("default", (val: any, defaultVal: any) => {
+      if (val === null || val === undefined || val === false || val === "" || (Array.isArray(val) && val.length === 0)) {
+        return defaultVal;
+      }
+      return val;
     });
 
     // Image filters
@@ -736,10 +1146,17 @@ export class ShopifyLiquidEngine {
   // ============================================
 
   async renderSection(sectionType: string, context: Record<string, any>): Promise<string> {
-    const sectionPath = path.join(this.themeDir, "sections", `${sectionType}.liquid`);
+    // Sanitize section type to prevent path traversal
+    const safeType = this.sanitizePath(sectionType);
+    const sectionPath = path.join(this.themeDir, "sections", `${safeType}.liquid`);
+
+    // Check if section is disabled
+    if (context.section?.disabled === true) {
+      return "";
+    }
 
     if (!fs.existsSync(sectionPath)) {
-      return `<!-- Section not found: ${sectionType} -->`;
+      return `<!-- Section not found: ${safeType} -->`;
     }
 
     let sectionContent = fs.readFileSync(sectionPath, "utf-8");
