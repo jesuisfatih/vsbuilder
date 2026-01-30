@@ -60,9 +60,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { admin, session } = await authenticate.admin(request);
 
-    if (!admin?.rest?.resources) {
+    if (!admin || !session) {
       return json({
-        shop: session?.shop || "demo-shop",
+        shop: "demo-shop",
         themeId: null,
         initialData: {
           template: { sections: {}, order: [] },
@@ -206,7 +206,7 @@ const SortableNavItem = ({
         className={clsx(
           "editor-navitem",
           isSelected && "editor-navitem--selected",
-          section.disabled && "opacity-60"
+          section.disabled && "editor-navitem--disabled"
         )}
         onClick={handleClick}
       >
@@ -236,7 +236,7 @@ const SortableNavItem = ({
         </div>
 
         {/* Title */}
-        <span className={clsx("editor-navitem__title", section.disabled && "line-through")}>
+        <span className={clsx("editor-navitem__title", section.disabled && "editor-navitem__title--disabled")}>
           {displayName}
         </span>
 
@@ -269,7 +269,7 @@ const SortableNavItem = ({
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: "auto" }}
           exit={{ opacity: 0, height: 0 }}
-          className="list-none p-0 m-0"
+          className="editor-blocks-list"
         >
           {section.block_order?.map((blockId) => {
             const block = section.blocks?.[blockId];
@@ -343,17 +343,17 @@ const BlockItem = ({ blockId, block, sectionId, groupType, isSelected }: BlockIt
       className={clsx(
         "editor-navitem editor-navitem--nested",
         isSelected && "editor-navitem--selected",
-        block.disabled && "opacity-60"
+        block.disabled && "editor-navitem--disabled"
       )}
       onClick={handleClick}
     >
       {/* Bullet */}
-      <div className="w-5 h-5 flex items-center justify-center">
-        <div className="w-1.5 h-1.5 rounded-full bg-current opacity-40" />
+      <div className="editor-navitem__bullet-wrapper">
+        <div className="editor-navitem__bullet" />
       </div>
 
       {/* Title */}
-      <span className={clsx("editor-navitem__title", block.disabled && "line-through")}>
+      <span className={clsx("editor-navitem__title", block.disabled && "editor-navitem__title--disabled")}>
         {displayName}
       </span>
 
@@ -400,7 +400,7 @@ const SectionGroup = ({ groupType, label, sections, order }: SectionGroupProps) 
     <div className="editor-section-group">
       <div className="editor-section-group__label">{label}</div>
       <SortableContext items={order} strategy={verticalListSortingStrategy}>
-        <ul className="list-none p-0 m-0">
+        <ul className="editor-navlist">
           {order.map((id) => {
             const section = sections[id];
             if (!section) return null;
@@ -477,7 +477,7 @@ const SettingsInspector = () => {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="editor-sidebar-secondary__container">
       {/* Header */}
       <header className="editor-sidebar-secondary__header">
         <h2 className="editor-sidebar-secondary__title">{displayName}</h2>
@@ -498,7 +498,7 @@ const SettingsInspector = () => {
             />
           ))
         ) : (
-          <p className="text-sm text-gray-400">No settings available.</p>
+          <p className="editor-empty-text">No settings available.</p>
         )}
       </div>
 
@@ -534,7 +534,7 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
   if (typeof value === "boolean") {
     return (
       <div className="editor-setting">
-        <div className="flex items-center justify-between">
+        <div className="editor-setting__row">
           <label className="editor-setting__label">{label}</label>
           <button
             className={clsx("editor-switch", value && "editor-switch--checked")}
@@ -725,7 +725,7 @@ export default function Editor() {
               <span className="editor-topbar__title">Exit</span>
             </button>
 
-            <span className="text-gray-300 mx-2">|</span>
+            <span className="editor-topbar__divider" />
 
             <span className="editor-topbar__title">{shop.split(".")[0]} Theme</span>
 
@@ -735,9 +735,7 @@ export default function Editor() {
             </span>
 
             {store.isDirty && (
-              <span className="text-xs text-orange-500 font-medium ml-2">
-                Unsaved changes
-              </span>
+              <span className="editor-topbar__unsaved">Unsaved changes</span>
             )}
           </div>
 
@@ -887,7 +885,7 @@ export default function Editor() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
                 transition={{ duration: 0.15 }}
-                className="h-full"
+                className="editor-sidebar-secondary__animation-wrapper"
               >
                 <SettingsInspector />
               </motion.div>
