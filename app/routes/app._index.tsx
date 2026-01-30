@@ -1,4 +1,4 @@
-import { PaintBrushIcon, RocketLaunchIcon } from "@heroicons/react/24/outline";
+import { PaintBrushIcon } from "@heroicons/react/24/outline";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import {
@@ -21,10 +21,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     let error = null;
 
     try {
-        const response = await (admin as any).rest.resources.Theme.all({
-          session: session,
-        });
-        themes = response.data;
+        // GraphQL query for themes
+        const response = await admin.graphql(`
+          query {
+            themes(first: 20) {
+              nodes {
+                id
+                name
+                role
+              }
+            }
+          }
+        `);
+        const data = await response.json();
+        themes = data.data?.themes?.nodes?.map((theme: any) => ({
+          ...theme,
+          id: theme.id.replace('gid://shopify/Theme/', '')
+        })) || [];
     } catch (e) {
         console.error("Theme API Error:", e);
         error = "Failed to fetch themes. Please check API permissions.";
@@ -154,11 +167,10 @@ export default function Index() {
                  variant="primary"
                  size="large"
                  fullWidth
-                 icon={RocketLaunchIcon}
                  onClick={toggleModal}
                  disabled={!!error}
                >
-                 Launch Editor
+                 🚀 Launch Editor
                </Button>
             </BlockStack>
           </Card>

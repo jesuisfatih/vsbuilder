@@ -1,6 +1,7 @@
 /**
  * 🛡️ EDITOR API ACTIONS
  * Handles all editor save/update operations via Remix actions
+ * Uses GraphQL API (REST API deprecated in v4.x)
  */
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
@@ -23,7 +24,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const { admin } = await authenticate.admin(request);
 
-    if (!admin?.rest?.resources?.Asset) {
+    if (!admin) {
       return json({
         success: false,
         error: "Not authenticated"
@@ -48,8 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return json({ success: false, error: "Template data is required" }, { status: 400 });
         }
 
-        const template = JSON.parse(templateData);
-        await saveThemeAsset(admin, themeId, "templates/index.json", template);
+        await saveThemeAsset(admin, themeId, "templates/index.json", templateData);
 
         return json({
           success: true,
@@ -64,8 +64,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return json({ success: false, error: "Header data is required" }, { status: 400 });
         }
 
-        const header = JSON.parse(headerData);
-        await saveThemeAsset(admin, themeId, "sections/header-group.json", header);
+        await saveThemeAsset(admin, themeId, "sections/header-group.json", headerData);
 
         return json({
           success: true,
@@ -80,8 +79,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return json({ success: false, error: "Footer data is required" }, { status: 400 });
         }
 
-        const footer = JSON.parse(footerData);
-        await saveThemeAsset(admin, themeId, "sections/footer-group.json", footer);
+        await saveThemeAsset(admin, themeId, "sections/footer-group.json", footerData);
 
         return json({
           success: true,
@@ -95,19 +93,49 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const headerData = formData.get("header") as string;
         const footerData = formData.get("footer") as string;
 
-        const results = await Promise.allSettled([
-          templateData ? saveThemeAsset(admin, themeId, "templates/index.json", JSON.parse(templateData)) : Promise.resolve(),
-          headerData ? saveThemeAsset(admin, themeId, "sections/header-group.json", JSON.parse(headerData)) : Promise.resolve(),
-          footerData ? saveThemeAsset(admin, themeId, "sections/footer-group.json", JSON.parse(footerData)) : Promise.resolve(),
-        ]);
+        const files = [];
+        if (templateData) {
+          files.push({ filename: "templates/index.json", body: { type: "TEXT", value: templateData } });
+        }
+        if (headerData) {
+          files.push({ filename: "sections/header-group.json", body: { type: "TEXT", value: headerData } });
+        }
+        if (footerData) {
+          files.push({ filename: "sections/footer-group.json", body: { type: "TEXT", value: footerData } });
+        }
 
-        const failures = results.filter(r => r.status === 'rejected');
+        if (files.length === 0) {
+          return json({ success: false, error: "No data to save" }, { status: 400 });
+        }
 
-        if (failures.length > 0) {
-          console.error("[Editor] Some saves failed:", failures);
+        const gid = themeId.includes('gid://') ? themeId : `gid://shopify/Theme/${themeId}`;
+
+        const response = await admin.graphql(`
+          mutation themeFilesUpsert($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
+            themeFilesUpsert(themeId: $themeId, files: $files) {
+              upsertedThemeFiles {
+                filename
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `, {
+          variables: {
+            themeId: gid,
+            files: files
+          }
+        });
+
+        const data = await response.json();
+
+        if (data.data?.themeFilesUpsert?.userErrors?.length > 0) {
+          console.error("[Editor] Save errors:", data.data.themeFilesUpsert.userErrors);
           return json({
             success: false,
-            error: `${failures.length} save(s) failed`,
+            error: data.data.themeFilesUpsert.userErrors[0].message,
             savedAt: new Date().toISOString()
           }, { status: 500 });
         }
@@ -135,18 +163,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 // ============================================
-// HELPER: Save Theme Asset
+// HELPER: Save Theme Asset via GraphQL
 // ============================================
 
-async function saveThemeAsset(admin: any, themeId: string, assetKey: string, data: any): Promise<void> {
-  const Asset = admin.rest.resources.Asset;
+async function saveThemeAsset(admin: any, themeId: string, assetKey: string, data: string): Promise<void> {
+  const gid = themeId.includes('gid://') ? themeId : `gid://shopify/Theme/${themeId}`;
 
-  const asset = new Asset({ session: admin.rest.session });
-  asset.theme_id = parseInt(themeId, 10);
-  asset.key = assetKey;
-  asset.value = JSON.stringify(data, null, 2);
+  const response = await admin.graphql(`
+    mutation themeFilesUpsert($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
+      themeFilesUpsert(themeId: $themeId, files: $files) {
+        upsertedThemeFiles {
+          filename
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `, {
+    variables: {
+      themeId: gid,
+      files: [{
+        filename: assetKey,
+        body: {
+          type: "TEXT",
+          value: data
+        }
+      }]
+    }
+  });
 
-  await asset.save({ update: true });
+  const result = await response.json();
+
+  if (result.data?.themeFilesUpsert?.userErrors?.length > 0) {
+    throw new Error(result.data.themeFilesUpsert.userErrors[0].message);
+  }
 
   console.log(`[Editor] Saved asset: ${assetKey} to theme ${themeId}`);
 }

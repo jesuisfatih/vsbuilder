@@ -34,6 +34,6 @@ redirect_urls = [
 embedded = false
 
 [app_proxy]
-url = "https://vsbuilder.techifyboost.com/app/proxy"
+url = "https://vsbuilder.techifyboost.com/proxy"
 subpath = "vsbuilder"
 prefix = "apps"
