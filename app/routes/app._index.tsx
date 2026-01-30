@@ -1,12 +1,104 @@
 import { PaintBrushIcon, RocketLaunchIcon } from "@heroicons/react/24/outline";
-import { useNavigate } from "@remix-run/react";
-import { Banner, BlockStack, Box, Button, Card, InlineStack, Layout, Page, Text } from "@shopify/polaris";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { useLoaderData, useNavigate } from "@remix-run/react";
+import {
+    Badge,
+    Banner, BlockStack, Box, Button, Card, InlineStack, Layout,
+    Modal,
+    Page,
+    ResourceItem,
+    ResourceList,
+    Text
+} from "@shopify/polaris";
+import { useCallback, useState } from "react";
+import { authenticate } from "../shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin, session } = await authenticate.admin(request);
+
+  const response = await (admin as any).rest.resources.Theme.all({
+    session: session,
+  });
+
+  return json({
+    themes: response.data,
+    shop: session.shop
+  });
+};
 
 export default function Index() {
+  const { themes, shop } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const [activeModal, setActiveModal] = useState(false);
+  const [selectedTheme, setSelectedTheme] = useState<any>(null);
+
+  const toggleModal = useCallback(() => setActiveModal((active) => !active), []);
+
+  const handleLaunchEditor = () => {
+    if (selectedTheme) {
+      // PROXY URL: https://store.myshopify.com/apps/vsbuilder/editor?themeId=...
+      // We open in a new tab for full screen experience
+      const url = `https://${shop}/apps/vsbuilder/editor?themeId=${selectedTheme.id}`;
+      window.open(url, '_blank');
+      toggleModal();
+    }
+  };
+
+  const renderItem = (item: any) => {
+    const { id, name, role } = item;
+    return (
+      <ResourceItem
+        id={id}
+        onClick={() => setSelectedTheme(item)}
+        accessibilityLabel={`View details for ${name}`}
+        persistActions
+      >
+        <InlineStack align="space-between">
+          <Text variant="bodyMd" fontWeight="bold" as="h3">
+            {name}
+          </Text>
+          {role === 'main' && <Badge tone="success">Live</Badge>}
+        </InlineStack>
+      </ResourceItem>
+    );
+  };
 
   return (
     <Page title="VSBuilder Dashboard">
+      <Modal
+        open={activeModal}
+        onClose={toggleModal}
+        title="Select a Theme to Edit"
+        primaryAction={{
+          content: 'Open Editor',
+          onAction: handleLaunchEditor,
+          disabled: !selectedTheme,
+        }}
+        secondaryActions={[
+          {
+            content: 'Cancel',
+            onAction: toggleModal,
+          },
+        ]}
+      >
+        <Modal.Section>
+          <p className="mb-4">Choose a theme to customize with VSBuilder visual editor.</p>
+          <Card>
+            <ResourceList
+              resourceName={{ singular: 'theme', plural: 'themes' }}
+              items={themes}
+              renderItem={renderItem}
+              selectedItems={selectedTheme ? [selectedTheme.id] : []}
+              onSelectionChange={(selected) => {
+                const theme = themes.find((t: any) => t.id === selected[0]);
+                setSelectedTheme(theme);
+              }}
+              selectable
+            />
+          </Card>
+        </Modal.Section>
+      </Modal>
+
       <Layout>
         <Layout.Section>
           <Banner title="System Ready" tone="success">
@@ -22,9 +114,9 @@ export default function Index() {
                      <PaintBrushIcon className="w-16 h-16 text-blue-600" />
                   </div>
                </Box>
-               <BlockStack gap="200 text-center">
-                  <Text as="h2" variant="headingLg">Page Editor</Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
+               <BlockStack gap="200">
+                  <Text as="h2" variant="headingLg" alignment="center">Page Editor</Text>
+                  <Text as="p" variant="bodyMd" tone="subdued" alignment="center">
                     Open the high-performance visual editor to customize your theme sections.
                   </Text>
                </BlockStack>
@@ -32,8 +124,8 @@ export default function Index() {
                  variant="primary"
                  size="large"
                  fullWidth
-                 icon={() => <RocketLaunchIcon className="w-5 h-5 mr-1" />}
-                 onClick={() => navigate("/app/editor?fullscreen=true")}
+                 icon={RocketLaunchIcon}
+                 onClick={toggleModal}
                >
                  Launch Editor
                </Button>
@@ -55,7 +147,7 @@ export default function Index() {
                  </InlineStack>
                  <InlineStack align="space-between">
                     <Text as="p">Domain</Text>
-                    <Text as="p" fontWeight="bold" tone="info">vsbuilder.techifyboost.com</Text>
+                    <Text as="p" fontWeight="bold" tone="subdued">vsbuilder.techifyboost.com</Text>
                  </InlineStack>
               </BlockStack>
            </Card>
