@@ -70,7 +70,7 @@ import {
   type Section,
 } from "../store/useEditorStore";
 import "../styles/editor.css";
-import { getActiveThemeId, getThemeAsset } from "../utils/theme.server";
+import { getThemeAsset, getThemeById, parseTemplateData } from "../utils/theme.server";
 
 // ============================================
 // LOADER
@@ -93,49 +93,82 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { admin, session } = await authenticate.admin(request);
     const url = new URL(request.url);
+    const themeIdParam = url.searchParams.get("themeId");
     const templateParam = url.searchParams.get("template") || "index";
 
     if (!admin || !session) {
       return json({
         shop: "demo-shop",
         themeId: null,
+        themeName: null,
+        themeRole: null,
+        sourceThemeId: null,
         currentTemplate: templateParam,
         availableTemplates: TEMPLATE_TYPES,
         initialData: {
-          template: { sections: {}, order: [] },
-          header: { sections: {}, order: [] },
-          footer: { sections: {}, order: [] },
+          template: { sections: {}, order: [] as string[] },
+          header: { sections: {}, order: [] as string[] },
+          footer: { sections: {}, order: [] as string[] },
         },
         previewUrl: "/",
         error: "Session not fully initialized. Please refresh the page.",
       });
     }
 
-    const themeId = await getActiveThemeId(admin);
-    if (!themeId) {
+    if (!themeIdParam) {
       return json({
         shop: session.shop,
         themeId: null,
+        themeName: null,
+        themeRole: null,
+        sourceThemeId: null,
         currentTemplate: templateParam,
         availableTemplates: TEMPLATE_TYPES,
         initialData: {
-          template: { sections: {}, order: [] },
-          header: { sections: {}, order: [] },
-          footer: { sections: {}, order: [] },
+          template: { sections: {}, order: [] as string[] },
+          header: { sections: {}, order: [] as string[] },
+          footer: { sections: {}, order: [] as string[] },
         },
         previewUrl: "/",
-        error: "No active theme found",
+        error: "No theme selected. Please go back and select a theme.",
+      });
+    }
+
+    // Get theme info
+    const themeInfo = await getThemeById(admin, themeIdParam);
+    if (!themeInfo) {
+      return json({
+        shop: session.shop,
+        themeId: null,
+        themeName: null,
+        themeRole: null,
+        sourceThemeId: null,
+        currentTemplate: templateParam,
+        availableTemplates: TEMPLATE_TYPES,
+        initialData: {
+          template: { sections: {}, order: [] as string[] },
+          header: { sections: {}, order: [] as string[] },
+          footer: { sections: {}, order: [] as string[] },
+        },
+        previewUrl: "/",
+        error: "Theme not found. Please select a different theme.",
       });
     }
 
     // Get template path from param
     const templateConfig = TEMPLATE_TYPES.find(t => t.value === templateParam) || TEMPLATE_TYPES[0];
 
+    // Download theme template and section group data
     const [templateData, headerGroup, footerGroup] = await Promise.all([
-      getThemeAsset(admin, themeId.toString(), templateConfig.path).catch(() => null),
-      getThemeAsset(admin, themeId.toString(), "sections/header-group.json").catch(() => null),
-      getThemeAsset(admin, themeId.toString(), "sections/footer-group.json").catch(() => null),
+      getThemeAsset(admin, themeIdParam, templateConfig.path).catch(() => null),
+      getThemeAsset(admin, themeIdParam, "sections/header-group.json").catch(() => null),
+      getThemeAsset(admin, themeIdParam, "sections/footer-group.json").catch(() => null),
     ]);
+
+    // Parse template data to get sections and order
+    const parsedTemplate = parseTemplateData(templateData);
+    const parsedHeader = parseTemplateData(headerGroup);
+    const parsedFooter = parseTemplateData(footerGroup);
 
     // Build preview URL based on template type
     let previewPath = "/";
@@ -150,31 +183,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       case "404": previewPath = "/404"; break;
     }
 
-    const previewUrl = `https://${session.shop}${previewPath}?preview_theme_id=${themeId}`;
+    const previewUrl = `https://${session.shop}${previewPath}?preview_theme_id=${themeIdParam}`;
 
     return json({
       shop: session.shop,
-      themeId: themeId.toString(),
+      themeId: themeIdParam,
+      themeName: themeInfo.name,
+      themeRole: themeInfo.role,
+      sourceThemeId: themeIdParam,
       currentTemplate: templateParam,
       availableTemplates: TEMPLATE_TYPES,
       initialData: {
-        template: templateData || { sections: {}, order: [] },
-        header: headerGroup || { sections: {}, order: [] },
-        footer: footerGroup || { sections: {}, order: [] },
+        template: parsedTemplate,
+        header: parsedHeader,
+        footer: parsedFooter,
       },
       previewUrl,
+      error: null,
     });
   } catch (error) {
     console.error("[Editor] Loader error:", error);
+    if (error instanceof Response) {
+      throw error;
+    }
     return json({
       shop: "demo-shop",
       themeId: null,
+      themeName: null,
+      themeRole: null,
+      sourceThemeId: null,
       currentTemplate: "index",
       availableTemplates: TEMPLATE_TYPES,
       initialData: {
-        template: { sections: {}, order: [] },
-        header: { sections: {}, order: [] },
-        footer: { sections: {}, order: [] },
+        template: { sections: {}, order: [] as string[] },
+        header: { sections: {}, order: [] as string[] },
+        footer: { sections: {}, order: [] as string[] },
       },
       previewUrl: "/",
       error: "Failed to load editor. Please try again.",
@@ -1618,11 +1661,11 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
 // ============================================
 
 export default function Editor() {
-  const { initialData, shop, themeId, previewUrl, currentTemplate, availableTemplates } = useLoaderData<typeof loader>();
+  const { initialData, shop, themeId, themeName, themeRole, sourceThemeId, previewUrl, currentTemplate, availableTemplates, error } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const fetcher = useFetcher();
-  const renderFetcher = useFetcher(); // Dedicated fetcher for rendering
-  const previewFetcher = useFetcher(); // Dedicated fetcher for full page preview
+  const renderFetcher = useFetcher();
+  const previewFetcher = useFetcher();
   const store = useEditorStore();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -1633,15 +1676,17 @@ export default function Editor() {
   const [sectionPickerGroup, setSectionPickerGroup] = useState<GroupType>("template");
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [renderMode, setRenderMode] = useState<"live" | "static">("live");
+  const [draftThemeId, setDraftThemeId] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   // Get current template label
   const currentTemplateLabel = availableTemplates?.find((t: { value: string; label: string }) => t.value === currentTemplate)?.label || "Home page";
 
-  // Handle template change
+  // Handle template change - Keep themeId in URL
   const handleTemplateChange = (templateValue: string) => {
     setShowTemplateDropdown(false);
-    setIframeReady(false); // Reset ready state
-    navigate(`/app/editor?template=${templateValue}`);
+    setIframeReady(false);
+    navigate(`/app/editor?themeId=${themeId}&template=${templateValue}`);
   };
 
   // Handle discard all changes
@@ -1845,17 +1890,42 @@ export default function Editor() {
     };
   }, [iframeReady, sendPreviewUpdate]);
 
-  // Track save status
+  // Track save status and update draft info
   useEffect(() => {
     if (fetcher.state === "submitting") {
       store.setSaving(true);
+      setSaveMessage(null);
     } else if (fetcher.state === "idle" && fetcher.data) {
       store.setSaving(false);
-      if ((fetcher.data as any).success) {
+      const response = fetcher.data as any;
+
+      if (response.success) {
         store.markClean();
+
+        // Update draft theme ID if returned
+        if (response.draftThemeId) {
+          setDraftThemeId(response.draftThemeId);
+
+          // Update preview URL to use draft theme
+          const newPreviewUrl = previewUrl.replace(
+            /preview_theme_id=\d+/,
+            `preview_theme_id=${response.draftThemeId.replace('gid://shopify/OnlineStoreTheme/', '')}`
+          );
+          store.setPreviewUrl(newPreviewUrl);
+        }
+
+        // Show success message
+        setSaveMessage(response.message || "Saved to draft!");
+
+        // Auto-dismiss message after 3 seconds
+        setTimeout(() => setSaveMessage(null), 3000);
+      } else if (response.error) {
+        setSaveMessage(`Error: ${response.error}`);
+        setTimeout(() => setSaveMessage(null), 5000);
       }
     }
-  }, [fetcher.state, fetcher.data]);
+  }, [fetcher.state, fetcher.data, previewUrl, store]);
+
 
   // Unsaved changes warning (beforeunload)
   useEffect(() => {
@@ -1972,21 +2042,22 @@ export default function Editor() {
     }
   };
 
-  // Save Handler
+  // Save Handler - Saves to draft theme
   const handleSave = useCallback(() => {
-    if (!themeId) return;
+    if (!sourceThemeId) return;
 
     const state = store.getSerializableState();
 
     const formData = new FormData();
-    formData.append("_action", "SAVE_ALL");
-    formData.append("themeId", themeId);
+    formData.append("_action", "SAVE_AS_DRAFT");
+    formData.append("sourceThemeId", sourceThemeId);
+    formData.append("currentTemplate", currentTemplate || "index");
     formData.append("template", JSON.stringify(state.template));
     formData.append("header", JSON.stringify(state.headerGroup));
     formData.append("footer", JSON.stringify(state.footerGroup));
 
     fetcher.submit(formData, { method: "POST", action: "/api/editor" });
-  }, [themeId, fetcher]);
+  }, [sourceThemeId, currentTemplate, fetcher, store]);
 
   const handleExit = () => {
     if (store.isDirty) {
@@ -1996,6 +2067,67 @@ export default function Editor() {
     }
     navigate("/app");
   };
+
+  // Show error state if theme loading failed
+  if (error) {
+    return (
+      <div className="editor-error-screen">
+        <div className="editor-error-content">
+          <XMarkIcon className="editor-error-icon" />
+          <h1 className="editor-error-title">Unable to Load Editor</h1>
+          <p className="editor-error-message">{error}</p>
+          <button
+            className="editor-error-button"
+            onClick={() => navigate("/app")}
+          >
+            Go Back to Dashboard
+          </button>
+        </div>
+        <style>{`
+          .editor-error-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+          }
+          .editor-error-content {
+            text-align: center;
+            padding: 40px;
+          }
+          .editor-error-icon {
+            width: 64px;
+            height: 64px;
+            color: #ef4444;
+            margin-bottom: 20px;
+          }
+          .editor-error-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 12px;
+          }
+          .editor-error-message {
+            color: #9ca3af;
+            margin-bottom: 24px;
+          }
+          .editor-error-button {
+            background: #3b82f6;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+          }
+          .editor-error-button:hover {
+            background: #2563eb;
+          }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <DndContext
@@ -2019,15 +2151,19 @@ export default function Editor() {
 
             <span className="editor-topbar__divider" />
 
-            <span className="editor-topbar__title">{shop.split(".")[0]} Theme</span>
+            <span className="editor-topbar__title">{themeName || shop.split(".")[0]}</span>
 
             <span className="editor-topbar__badge">
               <span className="editor-topbar__badge-dot" />
-              Live
+              {themeRole === 'main' ? 'Live' : themeRole === 'unpublished' ? 'Draft' : 'Theme'}
             </span>
 
             {store.isDirty && (
               <span className="editor-topbar__unsaved">Unsaved changes</span>
+            )}
+
+            {saveMessage && (
+              <span className="editor-topbar__save-message">{saveMessage}</span>
             )}
           </div>
 
@@ -2076,14 +2212,24 @@ export default function Editor() {
             </div>
           </div>
 
-          {/* Right: Save */}
+          {/* Right: Preview + Save */}
           <div className="editor-topbar__group">
+            <a
+              href={store.previewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="editor-topbar__preview-btn"
+              title="Open preview in new tab"
+            >
+              <EyeIcon className="w-4 h-4" />
+              Preview
+            </a>
             <button
               className="editor-topbar__save-btn"
               onClick={handleSave}
               disabled={store.isSaving || !store.isDirty}
             >
-              {store.isSaving ? "Saving..." : "Save"}
+              {store.isSaving ? "Saving..." : "Save as Draft"}
             </button>
           </div>
         </nav>

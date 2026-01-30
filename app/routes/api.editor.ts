@@ -1,23 +1,55 @@
 /**
  * 🛡️ EDITOR API ACTIONS
  * Handles all editor save/update operations via Remix actions
- * Uses GraphQL API (REST API deprecated in v4.x)
+ * Uses GraphQL API for theme operations
  */
-import { json, type ActionFunctionArgs } from "@remix-run/node";
+import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
+import {
+    downloadThemeData,
+    getOrCreateDraftTheme,
+    getThemeById,
+    saveThemeAssets
+} from "../utils/theme.server";
 
 // ============================================
-// ACTION TYPES
+// LOADER - Fetch theme data for editor
 // ============================================
 
-type EditorAction =
-  | { type: 'SAVE_TEMPLATE'; payload: { template: any; themeId: string } }
-  | { type: 'SAVE_HEADER'; payload: { header: any; themeId: string } }
-  | { type: 'SAVE_FOOTER'; payload: { footer: any; themeId: string } }
-  | { type: 'SAVE_ALL'; payload: { template: any; header: any; footer: any; themeId: string } };
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  try {
+    const { admin } = await authenticate.admin(request);
+    const url = new URL(request.url);
+    const themeId = url.searchParams.get("themeId");
+
+    if (!themeId) {
+      return json({ error: "Theme ID is required" }, { status: 400 });
+    }
+
+    // Download full theme data
+    const themeData = await downloadThemeData(admin, themeId);
+
+    if (!themeData) {
+      return json({ error: "Failed to download theme data" }, { status: 500 });
+    }
+
+    return json({
+      success: true,
+      theme: themeData.theme,
+      templates: themeData.templates,
+      sections: themeData.sections,
+      config: themeData.config
+    });
+  } catch (error) {
+    console.error("[Editor API] Loader error:", error);
+    return json({
+      error: error instanceof Error ? error.message : "Unknown error"
+    }, { status: 500 });
+  }
+};
 
 // ============================================
-// MAIN ACTION HANDLER
+// ACTION - Handle save operations
 // ============================================
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -33,116 +65,174 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const formData = await request.formData();
     const actionType = formData.get("_action") as string;
-    const themeId = formData.get("themeId") as string;
-
-    if (!themeId) {
-      return json({
-        success: false,
-        error: "Theme ID is required"
-      }, { status: 400 });
-    }
 
     switch (actionType) {
-      case "SAVE_TEMPLATE": {
-        const templateData = formData.get("template") as string;
-        if (!templateData) {
-          return json({ success: false, error: "Template data is required" }, { status: 400 });
-        }
-
-        await saveThemeAsset(admin, themeId, "templates/index.json", templateData);
-
-        return json({
-          success: true,
-          message: "Template saved successfully",
-          savedAt: new Date().toISOString()
-        });
-      }
-
-      case "SAVE_HEADER": {
-        const headerData = formData.get("header") as string;
-        if (!headerData) {
-          return json({ success: false, error: "Header data is required" }, { status: 400 });
-        }
-
-        await saveThemeAsset(admin, themeId, "sections/header-group.json", headerData);
-
-        return json({
-          success: true,
-          message: "Header saved successfully",
-          savedAt: new Date().toISOString()
-        });
-      }
-
-      case "SAVE_FOOTER": {
-        const footerData = formData.get("footer") as string;
-        if (!footerData) {
-          return json({ success: false, error: "Footer data is required" }, { status: 400 });
-        }
-
-        await saveThemeAsset(admin, themeId, "sections/footer-group.json", footerData);
-
-        return json({
-          success: true,
-          message: "Footer saved successfully",
-          savedAt: new Date().toISOString()
-        });
-      }
-
-      case "SAVE_ALL": {
+      case "SAVE_AS_DRAFT": {
+        const sourceThemeId = formData.get("sourceThemeId") as string;
         const templateData = formData.get("template") as string;
         const headerData = formData.get("header") as string;
         const footerData = formData.get("footer") as string;
+        const currentTemplate = formData.get("currentTemplate") as string || "index";
 
-        const files = [];
+        if (!sourceThemeId) {
+          return json({ success: false, error: "Source theme ID is required" }, { status: 400 });
+        }
+
+        // Get or create draft theme
+        const draftResult = await getOrCreateDraftTheme(admin, sourceThemeId);
+        if (!draftResult) {
+          return json({ success: false, error: "Failed to create draft theme" }, { status: 500 });
+        }
+
+        const { draftId, isNew } = draftResult;
+
+        // Prepare files to save
+        const filesToSave: Array<{key: string, value: string}> = [];
+
         if (templateData) {
-          files.push({ filename: "templates/index.json", body: { type: "TEXT", value: templateData } });
-        }
-        if (headerData) {
-          files.push({ filename: "sections/header-group.json", body: { type: "TEXT", value: headerData } });
-        }
-        if (footerData) {
-          files.push({ filename: "sections/footer-group.json", body: { type: "TEXT", value: footerData } });
+          const templatePath = `templates/${currentTemplate}.json`;
+          filesToSave.push({ key: templatePath, value: templateData });
         }
 
-        if (files.length === 0) {
+        if (headerData) {
+          filesToSave.push({ key: "sections/header-group.json", value: headerData });
+        }
+
+        if (footerData) {
+          filesToSave.push({ key: "sections/footer-group.json", value: footerData });
+        }
+
+        if (filesToSave.length > 0) {
+          await saveThemeAssets(admin, draftId, filesToSave);
+        }
+
+        // Get draft theme info for response
+        const draftTheme = await getThemeById(admin, draftId);
+
+        return json({
+          success: true,
+          message: isNew ? "Created new draft and saved changes" : "Saved changes to existing draft",
+          draftThemeId: draftId,
+          draftThemeName: draftTheme?.name,
+          savedAt: new Date().toISOString()
+        });
+      }
+
+      case "SAVE_TO_THEME": {
+        const themeId = formData.get("themeId") as string;
+        const templateData = formData.get("template") as string;
+        const headerData = formData.get("header") as string;
+        const footerData = formData.get("footer") as string;
+        const currentTemplate = formData.get("currentTemplate") as string || "index";
+
+        if (!themeId) {
+          return json({ success: false, error: "Theme ID is required" }, { status: 400 });
+        }
+
+        // Prepare files to save
+        const filesToSave: Array<{key: string, value: string}> = [];
+
+        if (templateData) {
+          const templatePath = `templates/${currentTemplate}.json`;
+          filesToSave.push({ key: templatePath, value: templateData });
+        }
+
+        if (headerData) {
+          filesToSave.push({ key: "sections/header-group.json", value: headerData });
+        }
+
+        if (footerData) {
+          filesToSave.push({ key: "sections/footer-group.json", value: footerData });
+        }
+
+        if (filesToSave.length === 0) {
           return json({ success: false, error: "No data to save" }, { status: 400 });
         }
 
-        const gid = themeId.includes('gid://') ? themeId : `gid://shopify/Theme/${themeId}`;
+        await saveThemeAssets(admin, themeId, filesToSave);
 
-        const response = await admin.graphql(`
-          mutation themeFilesUpsert($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
-            themeFilesUpsert(themeId: $themeId, files: $files) {
-              upsertedThemeFiles {
-                filename
-              }
-              userErrors {
-                field
-                message
-              }
-            }
-          }
-        `, {
-          variables: {
-            themeId: gid,
-            files: files
-          }
+        return json({
+          success: true,
+          message: "Changes saved to theme",
+          savedAt: new Date().toISOString()
         });
+      }
 
-        const data = await response.json();
+      case "DOWNLOAD_THEME": {
+        const themeId = formData.get("themeId") as string;
 
-        if (data.data?.themeFilesUpsert?.userErrors?.length > 0) {
-          console.error("[Editor] Save errors:", data.data.themeFilesUpsert.userErrors);
-          return json({
-            success: false,
-            error: data.data.themeFilesUpsert.userErrors[0].message,
-            savedAt: new Date().toISOString()
-          }, { status: 500 });
+        if (!themeId) {
+          return json({ success: false, error: "Theme ID is required" }, { status: 400 });
+        }
+
+        const themeData = await downloadThemeData(admin, themeId);
+
+        if (!themeData) {
+          return json({ success: false, error: "Failed to download theme" }, { status: 500 });
         }
 
         return json({
           success: true,
-          message: "All changes saved successfully",
+          theme: themeData.theme,
+          templates: themeData.templates,
+          sections: themeData.sections,
+          config: themeData.config
+        });
+      }
+
+      case "CREATE_DRAFT": {
+        const sourceThemeId = formData.get("sourceThemeId") as string;
+
+        if (!sourceThemeId) {
+          return json({ success: false, error: "Source theme ID is required" }, { status: 400 });
+        }
+
+        const draftResult = await getOrCreateDraftTheme(admin, sourceThemeId);
+
+        if (!draftResult) {
+          return json({ success: false, error: "Failed to create draft" }, { status: 500 });
+        }
+
+        const draftTheme = await getThemeById(admin, draftResult.draftId);
+
+        return json({
+          success: true,
+          draftThemeId: draftResult.draftId,
+          draftThemeName: draftTheme?.name,
+          isNew: draftResult.isNew
+        });
+      }
+
+      // Legacy action for backwards compatibility
+      case "SAVE_ALL": {
+        const themeId = formData.get("themeId") as string;
+        const templateData = formData.get("template") as string;
+        const headerData = formData.get("header") as string;
+        const footerData = formData.get("footer") as string;
+
+        if (!themeId) {
+          return json({ success: false, error: "Theme ID is required" }, { status: 400 });
+        }
+
+        const filesToSave: Array<{key: string, value: string}> = [];
+
+        if (templateData) {
+          filesToSave.push({ key: "templates/index.json", value: templateData });
+        }
+        if (headerData) {
+          filesToSave.push({ key: "sections/header-group.json", value: headerData });
+        }
+        if (footerData) {
+          filesToSave.push({ key: "sections/footer-group.json", value: footerData });
+        }
+
+        if (filesToSave.length > 0) {
+          await saveThemeAssets(admin, themeId, filesToSave);
+        }
+
+        return json({
+          success: true,
+          message: "All changes saved",
           savedAt: new Date().toISOString()
         });
       }
@@ -154,51 +244,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }, { status: 400 });
     }
   } catch (error) {
-    console.error("[Editor Action] Error:", error);
+    console.error("[Editor API] Action error:", error);
     return json({
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred"
     }, { status: 500 });
   }
 };
-
-// ============================================
-// HELPER: Save Theme Asset via GraphQL
-// ============================================
-
-async function saveThemeAsset(admin: any, themeId: string, assetKey: string, data: string): Promise<void> {
-  const gid = themeId.includes('gid://') ? themeId : `gid://shopify/Theme/${themeId}`;
-
-  const response = await admin.graphql(`
-    mutation themeFilesUpsert($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
-      themeFilesUpsert(themeId: $themeId, files: $files) {
-        upsertedThemeFiles {
-          filename
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `, {
-    variables: {
-      themeId: gid,
-      files: [{
-        filename: assetKey,
-        body: {
-          type: "TEXT",
-          value: data
-        }
-      }]
-    }
-  });
-
-  const result = await response.json();
-
-  if (result.data?.themeFilesUpsert?.userErrors?.length > 0) {
-    throw new Error(result.data.themeFilesUpsert.userErrors[0].message);
-  }
-
-  console.log(`[Editor] Saved asset: ${assetKey} to theme ${themeId}`);
-}

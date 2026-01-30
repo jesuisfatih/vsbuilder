@@ -8,39 +8,24 @@ import {
     Page,
     ResourceItem,
     ResourceList,
+    Spinner,
     Text
 } from "@shopify/polaris";
 import { useCallback, useState } from "react";
 import { authenticate } from "../shopify.server";
+import { getAllThemes, type ThemeInfo } from "../utils/theme.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { admin, session } = await authenticate.admin(request);
 
-    let themes = [];
-    let error = null;
+    let themes: ThemeInfo[] = [];
+    let error: string | null = null;
 
     try {
-        // GraphQL query for themes
-        const response = await admin.graphql(`
-          query {
-            themes(first: 20) {
-              nodes {
-                id
-                name
-                role
-              }
-            }
-          }
-        `);
-        const data = await response.json();
-        themes = data.data?.themes?.nodes?.map((theme: any) => ({
-          ...theme,
-          // Handle both GID formats: gid://shopify/Theme/... and gid://shopify/OnlineStoreTheme/...
-          id: theme.id.replace('gid://shopify/OnlineStoreTheme/', '').replace('gid://shopify/Theme/', '')
-        })) || [];
+        themes = await getAllThemes(admin);
     } catch (e) {
-        console.error("Theme API Error:", e);
+        console.error("[Dashboard] Theme API Error:", e);
         error = "Failed to fetch themes. Please check API permissions.";
     }
 
@@ -50,11 +35,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       error
     });
   } catch (err) {
-    // Crucial: Re-throw Response objects (redirects)
     if (err instanceof Response) {
       throw err;
     }
-    console.error("Loader Error:", err);
+    console.error("[Dashboard] Loader Error:", err);
     return json({
        themes: [],
        shop: "",
@@ -67,38 +51,63 @@ export default function Index() {
   const { themes, shop, error } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const [activeModal, setActiveModal] = useState(false);
-  const [selectedTheme, setSelectedTheme] = useState<any>(null);
+  const [selectedTheme, setSelectedTheme] = useState<ThemeInfo | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
 
   const toggleModal = useCallback(() => setActiveModal((active) => !active), []);
 
-  const handleLaunchEditor = () => {
+  const handleLaunchEditor = useCallback(() => {
     if (selectedTheme) {
-      // PROXY URL: https://store.myshopify.com/apps/vsbuilder/editor?themeId=...
-      // We open in a new tab for full screen experience
-      const url = `https://${shop}/apps/vsbuilder/editor?themeId=${selectedTheme.id}`;
-      window.open(url, '_blank');
-      toggleModal();
-    }
-  };
+      setIsNavigating(true);
+      // Extract numeric ID from GID
+      const numericId = selectedTheme.id
+        .replace('gid://shopify/OnlineStoreTheme/', '')
+        .replace('gid://shopify/Theme/', '');
 
-  const renderItem = (item: any) => {
-    const { id, name, role } = item;
+      // Navigate to Admin editor with theme ID
+      navigate(`/app/editor?themeId=${numericId}`);
+    }
+  }, [selectedTheme, navigate]);
+
+  const renderThemeItem = useCallback((item: ThemeInfo) => {
+    const numericId = item.id
+      .replace('gid://shopify/OnlineStoreTheme/', '')
+      .replace('gid://shopify/Theme/', '');
+    const isSelected = selectedTheme?.id === item.id;
+
     return (
       <ResourceItem
-        id={id}
+        id={numericId}
         onClick={() => setSelectedTheme(item)}
-        accessibilityLabel={`View details for ${name}`}
+        accessibilityLabel={`Select ${item.name}`}
         persistActions
       >
         <InlineStack align="space-between">
-          <Text variant="bodyMd" fontWeight="bold" as="h3">
-            {name}
-          </Text>
-          {role === 'main' && <Badge tone="success">Live</Badge>}
+          <InlineStack gap="200">
+            {isSelected && (
+              <div style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                backgroundColor: '#008060'
+              }} />
+            )}
+            <Text variant="bodyMd" fontWeight={isSelected ? "bold" : "regular"} as="h3">
+              {item.name}
+            </Text>
+          </InlineStack>
+          <InlineStack gap="200">
+            {item.role === 'main' && <Badge tone="success">Live</Badge>}
+            {item.role === 'unpublished' && <Badge tone="info">Draft</Badge>}
+          </InlineStack>
         </InlineStack>
       </ResourceItem>
     );
-  };
+  }, [selectedTheme]);
+
+  const liveThemes = themes.filter(t => t.role === 'main');
+  const draftThemes = themes.filter(t => t.role === 'unpublished');
+  const otherThemes = themes.filter(t => t.role !== 'main' && t.role !== 'unpublished');
 
   return (
     <Page title="VSBuilder Dashboard">
@@ -107,9 +116,10 @@ export default function Index() {
         onClose={toggleModal}
         title="Select a Theme to Edit"
         primaryAction={{
-          content: 'Open Editor',
+          content: isNavigating ? 'Opening...' : 'Open Editor',
           onAction: handleLaunchEditor,
-          disabled: !selectedTheme,
+          disabled: !selectedTheme || isNavigating,
+          loading: isNavigating,
         }}
         secondaryActions={[
           {
@@ -119,20 +129,60 @@ export default function Index() {
         ]}
       >
         <Modal.Section>
-          <p className="mb-4">Choose a theme to customize with VSBuilder visual editor.</p>
-          <Card>
-            <ResourceList
-              resourceName={{ singular: 'theme', plural: 'themes' }}
-              items={themes}
-              renderItem={renderItem}
-              selectedItems={selectedTheme ? [selectedTheme.id] : []}
-              onSelectionChange={(selected) => {
-                const theme = themes.find((t: any) => t.id === selected[0]);
-                setSelectedTheme(theme);
-              }}
-              selectable
-            />
-          </Card>
+          <BlockStack gap="400">
+            <Text as="p" variant="bodyMd" tone="subdued">
+              Choose a theme to customize with VSBuilder visual editor.
+              Changes will be saved to a draft copy of your theme.
+            </Text>
+
+            {liveThemes.length > 0 && (
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingSm">Live Theme</Text>
+                <Card>
+                  <ResourceList
+                    resourceName={{ singular: 'theme', plural: 'themes' }}
+                    items={liveThemes}
+                    renderItem={renderThemeItem}
+                  />
+                </Card>
+              </BlockStack>
+            )}
+
+            {draftThemes.length > 0 && (
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingSm">Draft Themes</Text>
+                <Card>
+                  <ResourceList
+                    resourceName={{ singular: 'theme', plural: 'themes' }}
+                    items={draftThemes}
+                    renderItem={renderThemeItem}
+                  />
+                </Card>
+              </BlockStack>
+            )}
+
+            {otherThemes.length > 0 && (
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingSm">Other Themes</Text>
+                <Card>
+                  <ResourceList
+                    resourceName={{ singular: 'theme', plural: 'themes' }}
+                    items={otherThemes}
+                    renderItem={renderThemeItem}
+                  />
+                </Card>
+              </BlockStack>
+            )}
+
+            {themes.length === 0 && !error && (
+              <Box padding="400">
+                <InlineStack align="center" gap="200">
+                  <Spinner size="small" />
+                  <Text as="p">Loading themes...</Text>
+                </InlineStack>
+              </Box>
+            )}
+          </BlockStack>
         </Modal.Section>
       </Modal>
 
@@ -145,7 +195,7 @@ export default function Index() {
             </Banner>
           ) : (
             <Banner title="System Ready" tone="success">
-              <p>Your Shopify App (2025-01 API) is connected and secure headers are active.</p>
+              <p>Connected to {shop}. Your visual editor is ready to use.</p>
             </Banner>
           )}
         </Layout.Section>
@@ -154,14 +204,14 @@ export default function Index() {
           <Card>
             <BlockStack gap="500">
                <Box padding="400" background="bg-surface-secondary" borderRadius="200">
-                  <div className="flex items-center justify-center py-6">
-                     <PaintBrushIcon className="w-16 h-16 text-blue-600" />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 0' }}>
+                     <PaintBrushIcon style={{ width: 64, height: 64, color: '#5c6ac4' }} />
                   </div>
                </Box>
                <BlockStack gap="200">
-                  <Text as="h2" variant="headingLg" alignment="center">Page Editor</Text>
+                  <Text as="h2" variant="headingLg" alignment="center">Visual Page Editor</Text>
                   <Text as="p" variant="bodyMd" tone="subdued" alignment="center">
-                    Open the high-performance visual editor to customize your theme sections.
+                    Open the visual editor to customize your theme sections, add widgets, and preview changes in real-time.
                   </Text>
                </BlockStack>
                <Button
@@ -180,31 +230,23 @@ export default function Index() {
         <Layout.Section variant="oneHalf">
            <Card>
               <BlockStack gap="400">
-                 <Text as="h2" variant="headingMd">Server Status</Text>
+                 <Text as="h2" variant="headingMd">Quick Stats</Text>
                  <InlineStack align="space-between">
-                    <Text as="p">Environment</Text>
-                    <Text as="p" fontWeight="bold">Production</Text>
+                    <Text as="p">Total Themes</Text>
+                    <Text as="p" fontWeight="bold">{themes.length}</Text>
                  </InlineStack>
                  <InlineStack align="space-between">
-                    <Text as="p">Port</Text>
-                    <Text as="p" fontWeight="bold">3000</Text>
+                    <Text as="p">Draft Themes</Text>
+                    <Text as="p" fontWeight="bold">{draftThemes.length}</Text>
                  </InlineStack>
                  <InlineStack align="space-between">
-                    <Text as="p">Domain</Text>
-                    <Text as="p" fontWeight="bold" tone="subdued">vsbuilder.techifyboost.com</Text>
+                    <Text as="p">Store</Text>
+                    <Text as="p" fontWeight="bold" tone="subdued">{shop || 'Loading...'}</Text>
                  </InlineStack>
               </BlockStack>
            </Card>
         </Layout.Section>
       </Layout>
-      <style>{`
-        .flex { display: flex; }
-        .items-center { align-items: center; }
-        .justify-center { justify-content: center; }
-        .w-16 { width: 4rem; }
-        .h-16 { height: 4rem; }
-        .text-blue-600 { color: #2563eb; }
-      `}</style>
     </Page>
   );
 }
