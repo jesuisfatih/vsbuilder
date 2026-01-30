@@ -1705,20 +1705,12 @@ export default function Editor() {
       initialData.header,
       initialData.footer
     );
-    // Initial fetch of preview
-    // Construct path based on current template roughly
-    let path = "/";
-    if (currentTemplate === "product") path = "/products/first"; // Ideally dynamic
-    else if (currentTemplate === "collection") path = "/collections/all";
-    else if (currentTemplate === "cart") path = "/cart";
-    else if (currentTemplate === "search") path = "/search";
 
-    // We fetch via our API proxy to avoid X-Frame-Options
-    const fetchUrl = `/api/preview?themeId=${themeId}&template=${currentTemplate}&path=${encodeURIComponent(path)}`;
+    // Set preview URL for display
+    store.setPreviewUrl(`https://${shop}/?preview_theme_id=${themeId}`);
 
-    // Use store.previewUrl just for display purposes in browser bar
-    store.setPreviewUrl(`https://${shop}${path}?preview_theme_id=${themeId}`);
-
+    // Use local render API (theme needs to be synced first)
+    const fetchUrl = `/api/render-local?themeId=${themeId}&template=${currentTemplate}`;
     previewFetcher.load(fetchUrl);
   }, [themeId, currentTemplate]); // Refetch when template changes
 
@@ -2342,12 +2334,8 @@ export default function Editor() {
                   <button
                     onClick={() => {
                       setIframeReady(false);
-                      let path = "/";
-                      if (currentTemplate === "product") path = "/products/first";
-                      else if (currentTemplate === "collection") path = "/collections/all";
-                      else if (currentTemplate === "cart") path = "/cart";
-                      else if (currentTemplate === "search") path = "/search";
-                      previewFetcher.load(`/api/preview?themeId=${themeId}&template=${currentTemplate}&path=${encodeURIComponent(path)}`);
+                      // Use local render API
+                      previewFetcher.load(`/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
                     }}
                     className="editor-preview__refresh"
                     title="Refresh Preview"

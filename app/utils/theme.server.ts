@@ -4,6 +4,11 @@
  * Using Shopify Admin GraphQL API
  */
 
+import * as fs from "fs";
+import * as path from "path";
+
+const THEMES_DIR = process.env.THEMES_DIR || path.join(process.cwd(), "storage", "themes");
+
 // ============================================
 // TYPE DEFINITIONS
 // ============================================
@@ -692,4 +697,75 @@ export async function saveEditorChanges(
   }
 
   return await saveThemeFiles(admin, themeId, files);
+}
+
+// ============================================
+// SAVE THEME TO LOCAL DISK
+// ============================================
+
+export async function saveThemeToLocal(
+  admin: any,
+  themeId: string,
+  shopHandle: string
+): Promise<boolean> {
+  console.log('[Theme] === Saving theme to local disk ===');
+  console.log('[Theme] Theme ID:', themeId);
+  console.log('[Theme] Shop:', shopHandle);
+
+  try {
+    // Create directory structure
+    const themeDir = path.join(THEMES_DIR, shopHandle, themeId);
+    const dirs = ['layout', 'templates', 'sections', 'snippets', 'assets', 'config', 'locales'];
+
+    for (const dir of dirs) {
+      const dirPath = path.join(themeDir, dir);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+    }
+
+    // List all theme files
+    const allFiles = await listThemeFiles(admin, themeId);
+    console.log(`[Theme] Found ${allFiles.length} files to download`);
+
+    // Download in batches of 10
+    const batchSize = 10;
+    for (let i = 0; i < allFiles.length; i += batchSize) {
+      const batch = allFiles.slice(i, i + batchSize);
+      const files = await getThemeFiles(admin, themeId, batch);
+
+      for (const file of files) {
+        if (!file.content) continue;
+
+        const filePath = path.join(themeDir, file.filename);
+        const fileDir = path.dirname(filePath);
+
+        // Ensure directory exists
+        if (!fs.existsSync(fileDir)) {
+          fs.mkdirSync(fileDir, { recursive: true });
+        }
+
+        // Write file
+        fs.writeFileSync(filePath, file.content, 'utf-8');
+      }
+
+      console.log(`[Theme] Downloaded batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(allFiles.length / batchSize)}`);
+    }
+
+    console.log(`[Theme] Theme saved to: ${themeDir}`);
+    return true;
+  } catch (error) {
+    console.error('[Theme] Error saving theme to local:', error);
+    return false;
+  }
+}
+
+export function getLocalThemePath(shopHandle: string, themeId: string): string {
+  return path.join(THEMES_DIR, shopHandle, themeId);
+}
+
+export function isThemeSavedLocally(shopHandle: string, themeId: string): boolean {
+  const themeDir = getLocalThemePath(shopHandle, themeId);
+  return fs.existsSync(path.join(themeDir, 'layout', 'theme.liquid')) ||
+         fs.existsSync(path.join(themeDir, 'templates', 'index.json'));
 }
