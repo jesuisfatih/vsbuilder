@@ -24,9 +24,9 @@ const TEMPLATE_TYPES = [
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
-    const { session } = await authenticate.public.appProxy(request);
+    const { session, admin } = await authenticate.public.appProxy(request);
 
-    if (!session) {
+    if (!session || !admin) {
       return json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -41,7 +41,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.log(`[ProxyEditor] Loading for Shop: ${session.shop}, Theme: ${themeIdParam}`);
 
     // Download theme
-    const themeData = await downloadThemeForEditor(session.shop, session.accessToken, themeIdParam);
+    const themeData = await downloadThemeForEditor(admin, themeIdParam, templateParam);
 
     if (!themeData) {
       throw new Error("Theme data unavailable");
