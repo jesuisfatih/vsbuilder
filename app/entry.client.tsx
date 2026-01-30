@@ -10,6 +10,13 @@ import { RemixBrowser } from "@remix-run/react";
 import { startTransition, StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
 
+// Declare global type
+declare global {
+  interface Window {
+    __VSBUILDER_PROXY_MODE__: boolean;
+  }
+}
+
 // Normalize App Proxy URLs to internal route format BEFORE hydration
 function normalizeAppProxyUrl() {
   const pathname = window.location.pathname;
@@ -22,7 +29,16 @@ function normalizeAppProxyUrl() {
     const newPath = pathname.replace(appProxyPattern, '/proxy/');
     console.log('[entry.client] Normalizing URL:', pathname, '->', newPath);
     window.history.replaceState(null, '', newPath + window.location.search);
+    // SET GLOBAL FLAG - this will be available before any useEffect runs
+    window.__VSBUILDER_PROXY_MODE__ = true;
+  } else if (pathname.startsWith('/proxy/')) {
+    // Already normalized (e.g., direct access or after refresh)
+    window.__VSBUILDER_PROXY_MODE__ = true;
+  } else {
+    window.__VSBUILDER_PROXY_MODE__ = false;
   }
+
+  console.log('[entry.client] Proxy mode:', window.__VSBUILDER_PROXY_MODE__);
 }
 
 // Normalize URL before hydration

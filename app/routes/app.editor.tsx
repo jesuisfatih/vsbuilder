@@ -1671,12 +1671,12 @@ export default function Editor() {
   const store = useEditorStore();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Helper function to get correct API paths - MUST be called inside useEffect (client-side only)
+  // Helper function to get correct API paths - uses global flag set by entry.client.tsx
   const getApiPaths = () => {
-    const pathname = window.location.pathname;
-    const isProxyMode = pathname.startsWith('/proxy/');
-    // DEBUG: Using alert to guarantee visibility
-    alert(`[DEBUG] pathname: ${pathname}, isProxyMode: ${isProxyMode}`);
+    // Use global flag set by entry.client.tsx BEFORE hydration
+    // This is more reliable than checking window.location.pathname
+    const isProxyMode = typeof window !== 'undefined' && window.__VSBUILDER_PROXY_MODE__ === true;
+    console.log('[getApiPaths] isProxyMode from global flag:', isProxyMode);
 
     if (isProxyMode) {
       return {
