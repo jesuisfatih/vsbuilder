@@ -679,12 +679,88 @@ interface SettingFieldProps {
 }
 
 const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
+  const [showColorPicker, setShowColorPicker] = useState(false);
+
   const label = settingKey
     .replace(/_/g, " ")
     .replace(/-/g, " ")
     .split(" ")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+
+  // Detect color fields by key name or value format
+  const isColorField =
+    settingKey.toLowerCase().includes("color") ||
+    settingKey.toLowerCase().includes("background") ||
+    (typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value));
+
+  // Color picker
+  if (isColorField && typeof value === "string") {
+    return (
+      <div className="editor-setting">
+        <label className="editor-setting__label">{label}</label>
+        <div className="editor-color-picker">
+          <button
+            className="editor-color-picker__trigger"
+            onClick={() => setShowColorPicker(!showColorPicker)}
+          >
+            <span
+              className="editor-color-picker__swatch"
+              style={{ backgroundColor: value || "#ffffff" }}
+            />
+            <span className="editor-color-picker__value">{value || "Select color"}</span>
+          </button>
+
+          {showColorPicker && (
+            <div className="editor-color-picker__popover">
+              <div
+                className="editor-color-picker__overlay"
+                onClick={() => setShowColorPicker(false)}
+              />
+              <div className="editor-color-picker__panel">
+                <div className="editor-color-picker__presets">
+                  {[
+                    "#000000", "#ffffff", "#1a1a1a", "#303030",
+                    "#2c6ecb", "#007f5f", "#e67e22", "#e74c3c",
+                    "#9b59b6", "#f39c12", "#16a085", "#3498db",
+                    "#e91e63", "#673ab7", "#00bcd4", "#8bc34a",
+                  ].map((presetColor) => (
+                    <button
+                      key={presetColor}
+                      className={clsx(
+                        "editor-color-picker__preset",
+                        value === presetColor && "editor-color-picker__preset--active"
+                      )}
+                      style={{ backgroundColor: presetColor }}
+                      onClick={() => {
+                        onChange(presetColor);
+                        setShowColorPicker(false);
+                      }}
+                    />
+                  ))}
+                </div>
+                <div className="editor-color-picker__custom">
+                  <input
+                    type="color"
+                    value={value || "#ffffff"}
+                    onChange={(e) => onChange(e.target.value)}
+                    className="editor-color-picker__input"
+                  />
+                  <input
+                    type="text"
+                    value={value || ""}
+                    onChange={(e) => onChange(e.target.value)}
+                    placeholder="#000000"
+                    className="editor-setting__input"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (typeof value === "boolean") {
     return (
@@ -712,6 +788,26 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
           onChange={(e) => onChange(parseInt(e.target.value, 10) || 0)}
           className="editor-setting__input"
         />
+      </div>
+    );
+  }
+
+  // Check for select-like fields (arrays)
+  if (Array.isArray(value)) {
+    return (
+      <div className="editor-setting">
+        <label className="editor-setting__label">{label}</label>
+        <select
+          value={value[0] || ""}
+          onChange={(e) => onChange([e.target.value])}
+          className="editor-setting__select"
+        >
+          {value.map((option: string, index: number) => (
+            <option key={index} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
       </div>
     );
   }
