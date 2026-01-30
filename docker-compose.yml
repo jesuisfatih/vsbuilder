@@ -17,6 +17,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - themes_data:/app/themes
     networks:
       - vsbuilder-network
     healthcheck:
@@ -75,3 +77,4 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  themes_data:

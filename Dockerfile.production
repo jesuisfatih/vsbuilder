@@ -48,6 +48,9 @@ COPY --from=builder --chown=remix:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=remix:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=remix:nodejs /app/prisma ./prisma
 
+# Create themes directory with write permissions
+RUN mkdir -p /app/themes && chown -R remix:nodejs /app/themes
+
 USER remix
 
 EXPOSE 3000
