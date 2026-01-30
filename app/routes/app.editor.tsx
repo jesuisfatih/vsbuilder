@@ -1673,7 +1673,10 @@ export default function Editor() {
 
   // Helper function to get correct API paths - MUST be called inside useEffect (client-side only)
   const getApiPaths = () => {
-    const isProxyMode = window.location.pathname.startsWith('/proxy/');
+    const pathname = window.location.pathname;
+    const isProxyMode = pathname.startsWith('/proxy/');
+    console.log('[getApiPaths] pathname:', pathname, 'isProxyMode:', isProxyMode);
+
     if (isProxyMode) {
       return {
         syncCheck: '/proxy/api.sync',
