@@ -205,6 +205,5 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 };
 
-export default function ProxyEditor() {
-  return null;
-}
+// No default export - this is a Resource Route (API-only)
+// Remix won't inject client-side scripts for this route

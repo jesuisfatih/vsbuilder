@@ -61,8 +61,4 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 };
 
-// Since loader returns a Response, the component won't be rendered by Remix in the same way,
-// but if it falls through, render null.
-export default function Proxy() {
-  return null;
-}
+// No default export - this is a Resource Route (API-only)
