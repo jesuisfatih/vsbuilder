@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "build": "remix vite:build",
+    "bundle-extension": "npm run build && node scripts/copy-assets.js",
+    "deploy-extension": "npm run bundle-extension && shopify app deploy",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",

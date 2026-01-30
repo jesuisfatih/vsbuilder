@@ -1,0 +1,24 @@
+{% if request.path contains '/apps/vsbuilder/editor' %}
+  <!-- Auto-generated assets from build -->
+  <link rel="stylesheet" href="{{ 'tailwind.css' | asset_url }}">
+  <script type="module" src="{{ 'entry.client.js' | asset_url }}"></script>
+  <script type="module" src="{{ 'proxy.assets.js' | asset_url }}"></script>
+  <script type="module" src="{{ 'proxy.editor.js' | asset_url }}"></script>
+  <script type="module" src="{{ 'proxy.render.js' | asset_url }}"></script>
+  <script type="module" src="{{ 'proxy.sync.js' | asset_url }}"></script>
+  <script type="module" src="{{ 'proxy._index.js' | asset_url }}"></script>
+  <script type="module" src="{{ 'root.js' | asset_url }}"></script>
+
+  <script>
+    window.ENV = window.ENV || {};
+    window.ENV.SHOPIFY_APP_URL = "https://vsbuilder.techifyboost.com";
+  </script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "VSBuilder Core",
+  "target": "head",
+  "settings": []
+}
+{% endschema %}

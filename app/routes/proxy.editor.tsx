@@ -9,7 +9,6 @@ import { authenticate } from "../shopify.server";
 import { downloadThemeForEditor } from "../utils/theme.server";
 
 // app.editor.tsx'den component'i import et
-import EditorComponent from "./app.editor";
 
 // Available template types
 const TEMPLATE_TYPES = [
@@ -126,54 +125,63 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.log('[ProxyEditor] Theme downloaded successfully');
     console.log('[ProxyEditor] Theme name:', themeData.theme.name);
 
-    // Build preview URL - kendi render motorumuzu kullan
+    // Build preview URL
     const previewUrl = `/api/render-local?themeId=${themeData.theme.numericId}&template=${templateParam}`;
 
-    return json({
-      shop: session.shop,
-      themeId: themeData.theme.numericId,
-      themeName: themeData.theme.name,
-      themeRole: themeData.theme.role,
-      sourceThemeId: themeData.theme.numericId,
-      currentTemplate: templateParam,
-      availableTemplates: TEMPLATE_TYPES,
-      initialData: {
-        template: {
-          sections: themeData.template.sections,
-          order: themeData.template.order,
-        },
-        header: {
-          sections: themeData.header.sections,
-          order: themeData.header.order,
-        },
-        footer: {
-          sections: themeData.footer.sections,
-          order: themeData.footer.order,
-        },
+    // Return HTML response directly (Resource Route)
+    // Assets will be injected by the Theme App Extension block
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>VSBuilder Editor</title>
+        </head>
+        <body style="margin:0; padding:0; overflow:hidden;">
+           <div id="root" style="height:100vh; width:100vw;"></div>
+
+           <script>
+             window.ENV = ${JSON.stringify({
+               SHOPIFY_APP_URL: "https://vsbuilder.techifyboost.com",
+             })};
+
+             window.remixContext = {
+               state: {
+                 loaderData: {
+                   "routes/proxy.editor": {
+                      shop: "${session.shop}",
+                      themeId: "${themeData.theme.numericId}",
+                      themeName: "${themeData.theme.name}",
+                      themeRole: "${themeData.theme.role}",
+                      sourceThemeId: "${themeData.theme.numericId}",
+                      currentTemplate: "${templateParam}",
+                      availableTemplates: ${JSON.stringify(TEMPLATE_TYPES)},
+                      initialData: {
+                        template: ${JSON.stringify({ sections: themeData.template.sections, order: themeData.template.order })},
+                        header: ${JSON.stringify({ sections: themeData.header.sections, order: themeData.header.order })},
+                        footer: ${JSON.stringify({ sections: themeData.footer.sections, order: themeData.footer.order })},
+                      },
+                      previewUrl: "${previewUrl}",
+                      error: null
+                   }
+                 }
+               }
+             };
+           </script>
+        </body>
+      </html>
+    `;
+
+    return new Response(html, {
+      headers: {
+        "Content-Type": "text/html",
       },
-      previewUrl,
-      error: null,
     });
+
   } catch (error) {
     console.error("[ProxyEditor] Loader error:", error);
-    return json({
-      shop: "",
-      themeId: null,
-      themeName: null,
-      themeRole: null,
-      sourceThemeId: null,
-      currentTemplate: "index",
-      availableTemplates: TEMPLATE_TYPES,
-      initialData: {
-        template: { sections: {}, order: [] as string[] },
-        header: { sections: {}, order: [] as string[] },
-        footer: { sections: {}, order: [] as string[] },
-      },
-      previewUrl: "/",
-      error: "Failed to load editor. Please try again.",
-    });
+    return new Response("<h1>Error loading editor</h1>", { status: 500, headers: { "Content-Type": "text/html" } });
   }
 };
-
-// Mevcut app.editor.tsx component'ini kullan
-export default EditorComponent;
+// Remove Default export since this is now a resource route

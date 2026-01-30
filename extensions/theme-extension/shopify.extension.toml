@@ -1,0 +1,9 @@
+api_version = "2024-07"
+
+[[extensions]]
+type = "theme_app_extension"
+name = "VSBuilder Editor"
+handle = "vsbuilder-editor"
+
+  [[extensions.targeting]]
+  target = "head"
