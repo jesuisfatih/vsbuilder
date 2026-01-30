@@ -1648,6 +1648,7 @@ export default function Editor() {
   const fetcher = useFetcher();
   const renderFetcher = useFetcher();
   const previewFetcher = useFetcher();
+  const syncFetcher = useFetcher();
   const store = useEditorStore();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -1660,6 +1661,8 @@ export default function Editor() {
   const [renderMode, setRenderMode] = useState<"live" | "static">("live");
   const [draftThemeId, setDraftThemeId] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [themeSynced, setThemeSynced] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   // Get current template label
   const currentTemplateLabel = availableTemplates?.find((t: { value: string; label: string }) => t.value === currentTemplate)?.label || "Home page";
@@ -1699,19 +1702,49 @@ export default function Editor() {
   );
 
   // Initialize store
+  // Check if theme is synced locally and sync if needed
+  useEffect(() => {
+    // Check sync status
+    fetch(`/api/theme-sync?themeId=${themeId}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.synced) {
+          setThemeSynced(true);
+          // Load preview since theme is synced
+          previewFetcher.load(`/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
+        } else {
+          // Theme not synced, trigger sync
+          setSyncing(true);
+          syncFetcher.submit(
+            { themeId },
+            { method: "POST", action: "/api/theme-sync" }
+          );
+        }
+      })
+      .catch(err => {
+        console.error("Sync check error:", err);
+      });
+  }, [themeId]);
+
+  // Handle sync completion
+  useEffect(() => {
+    if (syncFetcher.data && (syncFetcher.data as any).success) {
+      setThemeSynced(true);
+      setSyncing(false);
+      // Now load the preview
+      previewFetcher.load(`/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
+    }
+  }, [syncFetcher.data]);
+
+  // Initialize store
   useEffect(() => {
     store.initializeFromServer(
       initialData.template,
       initialData.header,
       initialData.footer
     );
-
     // Set preview URL for display
     store.setPreviewUrl(`https://${shop}/?preview_theme_id=${themeId}`);
-
-    // Use local render API (theme needs to be synced first)
-    const fetchUrl = `/api/render-local?themeId=${themeId}&template=${currentTemplate}`;
-    previewFetcher.load(fetchUrl);
   }, [themeId, currentTemplate]); // Refetch when template changes
 
   // Inject Preview HTML
@@ -2356,7 +2389,18 @@ export default function Editor() {
 
               {/* Preview Iframe Container */}
               <div className="editor-preview__frame-container">
-                {previewFetcher.state === "loading" && (
+                {syncing && (
+                  <div className="editor-preview__loading" style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}>
+                    <div className="editor-preview__spinner" />
+                    <span style={{ color: 'white', fontSize: '16px', marginTop: '16px' }}>
+                      Syncing theme files...
+                    </span>
+                    <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '12px', marginTop: '8px' }}>
+                      This may take a minute for first-time setup
+                    </span>
+                  </div>
+                )}
+                {!syncing && previewFetcher.state === "loading" && (
                   <div className="editor-preview__loading">
                     <div className="editor-preview__spinner" />
                     <span>Loading preview...</span>
