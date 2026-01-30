@@ -12,7 +12,7 @@ import { authenticate } from "../shopify.server";
 import { createShopifyLiquidEngine } from "../utils/liquidEngine.server";
 
 // Theme storage directory
-const THEMES_DIR = process.env.THEMES_DIR || path.join(process.cwd(), "storage", "themes");
+const THEMES_DIR = process.env.THEMES_DIR || path.join(process.cwd(), "themes");
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
