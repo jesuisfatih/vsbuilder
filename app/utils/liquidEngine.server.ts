@@ -5,6 +5,7 @@
  * LiquidJS kullanarak Liquid şablonlarını işler.
  */
 
+import { createHash, createHmac } from "crypto";
 import * as fs from "fs";
 import { Liquid } from "liquidjs";
 import * as path from "path";
@@ -714,6 +715,183 @@ export class ShopifyLiquidEngine {
           console.error(`Error including snippet ${this.snippetName}:`, error);
           return `<!-- Include Error: ${this.snippetName} -->`;
         }
+      },
+    });
+
+    // {% break %} - Exit for loop early
+    this.engine.registerTag("break", {
+      parse() {},
+      render() {
+        // LiquidJS handles break natively, this is a fallback
+        return "";
+      },
+    });
+
+    // {% continue %} - Skip to next iteration
+    this.engine.registerTag("continue", {
+      parse() {},
+      render() {
+        // LiquidJS handles continue natively, this is a fallback
+        return "";
+      },
+    });
+
+    // {% content_for 'header' %} or {% content_for 'blocks' %}
+    this.engine.registerTag("content_for", {
+      parse(tagToken: any) {
+        const args = tagToken.args.trim();
+        const match = args.match(/['"]([^'"]+)['"]/);
+        this.contentName = match ? match[1] : args;
+      },
+      render(scope: any) {
+        const ctx = scope.getAll();
+        // Return the content_for_* variable from context
+        const varName = `content_for_${this.contentName}`;
+        return ctx[varName] || "";
+      },
+    });
+
+    // {% layout 'theme' %} or {% layout none %}
+    this.engine.registerTag("layout", {
+      parse(tagToken: any) {
+        const args = tagToken.args.trim();
+        this.layoutName = args.replace(/['"]/g, "");
+      },
+      render() {
+        // Layout is handled at the template level, not here
+        return "";
+      },
+    });
+
+    // {% paginate collection.products by 12 %}...{% endpaginate %}
+    this.engine.registerTag("paginate", {
+      parse(tagToken: any, remainTokens: any[]) {
+        const args = tagToken.args.trim();
+        // Parse: collection.products by 12
+        const match = args.match(/([^\s]+)\s+by\s+(\d+)/);
+        this.collectionExpr = match ? match[1] : "";
+        this.perPage = match ? parseInt(match[2], 10) : 16;
+
+        this.paginateContent = "";
+        let level = 1;
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "paginate") level++;
+          if (token.name === "endpaginate") {
+            level--;
+            if (level === 0) break;
+          }
+          this.paginateContent += token.raw || token.getText?.() || "";
+        }
+      },
+      async render(scope: any) {
+        const ctx = scope.getAll();
+
+        // Get the array from expression (e.g., collection.products)
+        const parts = this.collectionExpr.split(".");
+        let items = ctx;
+        for (const part of parts) {
+          items = items?.[part];
+        }
+
+        if (!Array.isArray(items)) {
+          items = [];
+        }
+
+        const total = items.length;
+        const pages = Math.ceil(total / this.perPage);
+        const currentPage = 1; // Default to first page
+
+        // Create paginate object
+        const paginate = {
+          current_offset: 0,
+          current_page: currentPage,
+          items: items.slice(0, this.perPage),
+          page_size: this.perPage,
+          pages,
+          parts: Array.from({ length: pages }, (_, i) => ({
+            is_link: i + 1 !== currentPage,
+            title: String(i + 1),
+            url: `?page=${i + 1}`,
+          })),
+          previous: null,
+          next: pages > 1 ? { title: "Next", url: "?page=2" } : null,
+        };
+
+        const paginatedCtx = { ...ctx, paginate };
+
+        // Also update the original collection to be paginated
+        const lastPart = parts[parts.length - 1];
+        if (parts.length > 1) {
+          const parentParts = parts.slice(0, -1);
+          let parent = paginatedCtx;
+          for (const p of parentParts) {
+            parent = parent[p];
+          }
+          if (parent) {
+            parent[lastPart] = items.slice(0, this.perPage);
+          }
+        } else {
+          paginatedCtx[lastPart] = items.slice(0, this.perPage);
+        }
+
+        return await self.engine.parseAndRender(this.paginateContent, paginatedCtx);
+      },
+    });
+
+    // {% comment %}...{% endcomment %} - Already built into liquidjs but register for compatibility
+    this.engine.registerTag("comment", {
+      parse(tagToken: any, remainTokens: any[]) {
+        let level = 1;
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "comment") level++;
+          if (token.name === "endcomment") {
+            level--;
+            if (level === 0) break;
+          }
+        }
+      },
+      render() {
+        return ""; // Comments produce no output
+      },
+    });
+
+    // {% liquid %}...{% endliquid %} - Multi-line liquid tag
+    this.engine.registerTag("liquid", {
+      parse(tagToken: any, remainTokens: any[]) {
+        this.liquidContent = "";
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "endliquid") break;
+          this.liquidContent += token.raw || token.getText?.() || "";
+        }
+      },
+      async render(scope: any) {
+        // Convert liquid tag syntax to normal Liquid
+        const lines = this.liquidContent.split("\n");
+        let converted = "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          // Check if it's a tag (starts with keyword) or an echo
+          if (trimmed.startsWith("echo ")) {
+            converted += `{{ ${trimmed.slice(5)} }}`;
+          } else if (trimmed.startsWith("assign ") || trimmed.startsWith("if ") ||
+                     trimmed.startsWith("elsif ") || trimmed.startsWith("else") ||
+                     trimmed.startsWith("endif") || trimmed.startsWith("for ") ||
+                     trimmed.startsWith("endfor") || trimmed.startsWith("unless ") ||
+                     trimmed.startsWith("endunless") || trimmed.startsWith("case ") ||
+                     trimmed.startsWith("when ") || trimmed.startsWith("endcase")) {
+            converted += `{% ${trimmed} %}`;
+          } else {
+            converted += `{% ${trimmed} %}`;
+          }
+        }
+
+        return await self.engine.parseAndRender(converted, scope.getAll());
       },
     });
   }
@@ -1431,6 +1609,104 @@ export class ShopifyLiquidEngine {
     this.engine.registerFilter("preload_tag", (url: string, options?: any) => {
       const as = options?.as || "script";
       return `<link rel="preload" href="${url}" as="${as}">`;
+    });
+
+    // Hash filters
+    this.engine.registerFilter("md5", (str: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return createHash("md5").update(str).digest("hex");
+    });
+
+    this.engine.registerFilter("sha1", (str: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return createHash("sha1").update(str).digest("hex");
+    });
+
+    this.engine.registerFilter("sha256", (str: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return createHash("sha256").update(str).digest("hex");
+    });
+
+    this.engine.registerFilter("hmac_sha1", (str: string, secret: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return createHmac("sha1", secret || "").update(str).digest("hex");
+    });
+
+    this.engine.registerFilter("hmac_sha256", (str: string, secret: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return createHmac("sha256", secret || "").update(str).digest("hex");
+    });
+
+    // Base64 filters
+    this.engine.registerFilter("base64_encode", (str: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return Buffer.from(str).toString("base64");
+    });
+
+    this.engine.registerFilter("base64_decode", (str: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      try {
+        return Buffer.from(str, "base64").toString("utf-8");
+      } catch {
+        return str;
+      }
+    });
+
+    // Base64 URL safe variants
+    this.engine.registerFilter("base64_url_safe_encode", (str: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      return Buffer.from(str).toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    });
+
+    this.engine.registerFilter("base64_url_safe_decode", (str: string) => {
+      if (typeof str !== "string") str = String(str ?? "");
+      // Add padding back
+      const pad = str.length % 4;
+      if (pad) str += "=".repeat(4 - pad);
+      str = str.replace(/-/g, "+").replace(/_/g, "/");
+      try {
+        return Buffer.from(str, "base64").toString("utf-8");
+      } catch {
+        return str;
+      }
+    });
+
+    // JSON filters
+    this.engine.registerFilter("json", (obj: any) => {
+      try {
+        return JSON.stringify(obj);
+      } catch {
+        return "null";
+      }
+    });
+
+    // URL encode/decode
+    this.engine.registerFilter("url_encode", (str: string) => {
+      if (typeof str !== "string") return str;
+      return encodeURIComponent(str);
+    });
+
+    this.engine.registerFilter("url_decode", (str: string) => {
+      if (typeof str !== "string") return str;
+      try {
+        return decodeURIComponent(str);
+      } catch {
+        return str;
+      }
+    });
+
+    // URL escape (for use in HTML attributes)
+    this.engine.registerFilter("url_escape", (str: string) => {
+      if (typeof str !== "string") return str;
+      return encodeURI(str);
+    });
+
+    this.engine.registerFilter("url_param_escape", (str: string) => {
+      if (typeof str !== "string") return str;
+      return encodeURIComponent(str);
     });
   }
 
