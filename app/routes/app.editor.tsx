@@ -33,17 +33,18 @@ import {
   EyeIcon,
   EyeSlashIcon,
   MagnifyingGlassIcon,
+  PhotoIcon,
   PlusCircleIcon,
   Square3Stack3DIcon,
   Squares2X2Icon,
   TrashIcon,
-  XMarkIcon,
+  XMarkIcon
 } from "@heroicons/react/24/outline";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getDefaultSettings,
   SECTION_CATEGORIES,
@@ -801,6 +802,81 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
     );
   }
 
+  // Detect image fields by key name
+  const isImageField =
+    settingKey.toLowerCase().includes("image") ||
+    settingKey.toLowerCase().includes("logo") ||
+    settingKey.toLowerCase().includes("cover") ||
+    settingKey.toLowerCase().includes("banner") ||
+    settingKey.toLowerCase().includes("photo");
+
+  // Image picker
+  if (isImageField) {
+    const hasImage = typeof value === "string" && value.length > 0;
+    const filename = hasImage ? value.split("/").pop() : null;
+
+    return (
+      <div className="editor-setting">
+        <label className="editor-setting__label">{label}</label>
+        <div className="editor-image-picker">
+          <button
+            className={clsx(
+              "editor-image-picker__trigger",
+              hasImage && "editor-image-picker__trigger--has-image"
+            )}
+            onClick={() => {
+              // In a full implementation, this would open the Shopify Files picker
+              // For now, we'll use a simple prompt
+              const url = prompt("Enter image URL:", value || "");
+              if (url !== null) {
+                onChange(url);
+              }
+            }}
+          >
+            {hasImage ? (
+              <img
+                src={value}
+                alt={label}
+                className="editor-image-picker__preview"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
+            ) : (
+              <div className="editor-image-picker__placeholder">
+                <PhotoIcon className="editor-image-picker__placeholder-icon" />
+              </div>
+            )}
+            <div className="editor-image-picker__info">
+              {hasImage ? (
+                <span className="editor-image-picker__filename">{filename}</span>
+              ) : (
+                <>
+                  <span className="editor-image-picker__label">Select image</span>
+                  <span className="editor-image-picker__hint">or drop an image to upload</span>
+                </>
+              )}
+            </div>
+            {hasImage && (
+              <div className="editor-image-picker__actions">
+                <button
+                  className="editor-image-picker__btn editor-image-picker__btn--remove"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChange("");
+                  }}
+                  title="Remove image"
+                >
+                  <TrashIcon className="editor-image-picker__btn-icon" />
+                </button>
+              </div>
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Default: text input
   return (
     <div className="editor-setting">
@@ -824,8 +900,10 @@ export default function Editor() {
   const navigate = useNavigate();
   const fetcher = useFetcher();
   const store = useEditorStore();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [iframeReady, setIframeReady] = useState(false);
 
   // DnD Sensors
   const sensors = useSensors(
@@ -842,6 +920,74 @@ export default function Editor() {
     );
     store.setPreviewUrl(previewUrl);
   }, []);
+
+  // Listen for iframe ready message
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === "vsbuilder:ready") {
+        setIframeReady(true);
+        // Send initial state
+        sendPreviewUpdate();
+      }
+      if (event.data?.type === "vsbuilder:section-click") {
+        const { sectionId, groupType } = event.data;
+        if (sectionId && groupType) {
+          store.selectSection(groupType, sectionId);
+        }
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  // Send preview updates when store changes
+  const sendPreviewUpdate = useCallback(() => {
+    if (!iframeRef.current?.contentWindow) return;
+
+    const data = {
+      type: "vsbuilder:update",
+      payload: {
+        template: store.template,
+        headerGroup: store.headerGroup,
+        footerGroup: store.footerGroup,
+        selectedPath: store.selectedPath,
+      },
+    };
+
+    iframeRef.current.contentWindow.postMessage(data, "*");
+  }, [store.template, store.headerGroup, store.footerGroup, store.selectedPath]);
+
+  // Subscribe to store changes and send updates to preview
+  useEffect(() => {
+    // Debounced update to avoid flooding iframe
+    let timeout: NodeJS.Timeout;
+    const debouncedUpdate = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        if (iframeReady) {
+          sendPreviewUpdate();
+        }
+      }, 100);
+    };
+
+    // Manual subscription to zustand store
+    const unsubscribe = useEditorStore.subscribe(
+      (state) => ({
+        template: state.template,
+        headerGroup: state.headerGroup,
+        footerGroup: state.footerGroup,
+        selectedPath: state.selectedPath,
+      }),
+      debouncedUpdate,
+      { equalityFn: (a, b) => JSON.stringify(a) === JSON.stringify(b) }
+    );
+
+    return () => {
+      clearTimeout(timeout);
+      unsubscribe();
+    };
+  }, [iframeReady, sendPreviewUpdate]);
 
   // Track save status
   useEffect(() => {
@@ -1108,9 +1254,14 @@ export default function Editor() {
                 )}
               >
                 <iframe
+                  ref={iframeRef}
                   src={store.previewUrl}
                   className="editor-preview__iframe"
                   title="Store preview"
+                  onLoad={() => {
+                    // Fallback if iframe doesn't send ready message
+                    setTimeout(() => setIframeReady(true), 1000);
+                  }}
                 />
               </motion.div>
             </div>
