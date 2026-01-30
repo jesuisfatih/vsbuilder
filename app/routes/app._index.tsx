@@ -14,20 +14,39 @@ import { useCallback, useState } from "react";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  try {
+    const { admin, session } = await authenticate.admin(request);
 
-  const response = await (admin as any).rest.resources.Theme.all({
-    session: session,
-  });
+    let themes = [];
+    let error = null;
 
-  return json({
-    themes: response.data,
-    shop: session.shop
-  });
+    try {
+        const response = await (admin as any).rest.resources.Theme.all({
+          session: session,
+        });
+        themes = response.data;
+    } catch (e) {
+        console.error("Theme API Error:", e);
+        error = "Failed to fetch themes. Please check API permissions.";
+    }
+
+    return json({
+      themes,
+      shop: session.shop,
+      error
+    });
+  } catch (err) {
+    console.error("Loader Error:", err);
+    return json({
+       themes: [],
+       shop: "",
+       error: "Authentication failed."
+    });
+  }
 };
 
 export default function Index() {
-  const { themes, shop } = useLoaderData<typeof loader>();
+  const { themes, shop, error } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const [activeModal, setActiveModal] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState<any>(null);
@@ -101,9 +120,16 @@ export default function Index() {
 
       <Layout>
         <Layout.Section>
-          <Banner title="System Ready" tone="success">
-            <p>Your Shopify App (2025-01 API) is connected and secure headers are active.</p>
-          </Banner>
+          {error ? (
+            <Banner title="Dashboard Error" tone="critical">
+              <p>{error}</p>
+              <p>Please try reloading the page.</p>
+            </Banner>
+          ) : (
+            <Banner title="System Ready" tone="success">
+              <p>Your Shopify App (2025-01 API) is connected and secure headers are active.</p>
+            </Banner>
+          )}
         </Layout.Section>
 
         <Layout.Section variant="oneHalf">
@@ -126,6 +152,7 @@ export default function Index() {
                  fullWidth
                  icon={RocketLaunchIcon}
                  onClick={toggleModal}
+                 disabled={!!error}
                >
                  Launch Editor
                </Button>
