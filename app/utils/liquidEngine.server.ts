@@ -83,6 +83,8 @@ export class ShopifyLiquidEngine {
   private themeFiles: ThemeFiles | null = null;
   private sectionSchemas: Map<string, any[]> = new Map();
   private locales: Record<string, any> = {};
+  private renderDepth: number = 0;
+  private maxRenderDepth: number = 50;
 
   constructor(themeDir: string) {
     this.themeDir = themeDir;
@@ -106,8 +108,22 @@ export class ShopifyLiquidEngine {
 
   // Sanitize path to prevent directory traversal
   private sanitizePath(name: string): string {
-    // Remove path traversal attempts
-    return name.replace(/\.\./g, "").replace(/[\\/]/g, "").replace(/^\.*/, "");
+    if (!name || typeof name !== "string") return "";
+    // Remove any path traversal attempts and dangerous characters
+    let safe = name
+      .replace(/\.\.\.+/g, "")  // Remove multiple dots
+      .replace(/\.\./g, "")     // Remove ..
+      .replace(/[\\\/]/g, "")  // Remove slashes
+      .replace(/^\.*/, "")      // Remove leading dots
+      .replace(/[<>:"|?*]/g, ""); // Remove Windows invalid chars
+
+    // Validate final path doesn't escape theme directory
+    const testPath = path.resolve(this.themeDir, "test", safe + ".liquid");
+    if (!testPath.startsWith(path.resolve(this.themeDir))) {
+      console.error(`[Security] Path traversal attempt blocked: ${name}`);
+      return "";
+    }
+    return safe;
   }
 
   // Load locale files for translations
@@ -228,12 +244,19 @@ export class ShopifyLiquidEngine {
       },
     });
 
-    // {% render 'snippet-name' %}
+    // {% render 'snippet-name' %} or {% render 'snippet' with product %} or {% render 'snippet' for array as item %}
     this.engine.registerTag("render", {
       parse(tagToken: any) {
         const args = tagToken.args.trim();
         const match = args.match(/['"]([^'"]+)['"]/);
         this.snippetName = match ? match[1] : args.split(/\s|,/)[0].replace(/['"]/g, "");
+
+        // Check for "with" syntax: {% render 'snippet' with product %}
+        this.withVar = null;
+        const withMatch = args.match(/with\s+([\w.]+)(?:\s+as\s+(\w+))?/);
+        if (withMatch) {
+          this.withVar = { expr: withMatch[1], alias: withMatch[2] || this.snippetName.replace(/-/g, "_") };
+        }
 
         // Check for "for" syntax: {% render 'snippet' for array as item %}
         this.forLoop = null;
@@ -251,9 +274,21 @@ export class ShopifyLiquidEngine {
         }
       },
       async render(scope: any) {
+        // Check render depth to prevent infinite recursion
+        if (self.renderDepth >= self.maxRenderDepth) {
+          console.error(`[Render] Max render depth (${self.maxRenderDepth}) exceeded for: ${this.snippetName}`);
+          return `<!-- Max render depth exceeded: ${this.snippetName} -->`;
+        }
+
         try {
+          self.renderDepth++;
+
           // Sanitize snippet name to prevent path traversal
           const safeName = self.sanitizePath(this.snippetName);
+          if (!safeName) {
+            return `<!-- Invalid snippet name: ${this.snippetName} -->`;
+          }
+
           const snippetPath = path.join(self.themeDir, "snippets", `${safeName}.liquid`);
 
           if (!fs.existsSync(snippetPath)) {
@@ -263,6 +298,16 @@ export class ShopifyLiquidEngine {
           const snippetContent = fs.readFileSync(snippetPath, "utf-8");
           const parentContext = scope.getAll();
 
+          // Helper to resolve variable from context
+          const resolveVar = (expr: string): any => {
+            const parts = expr.split(".");
+            let value: any = parentContext;
+            for (const part of parts) {
+              value = value?.[part];
+            }
+            return value;
+          };
+
           // Resolve variable assignments
           const resolvedAssignments: Record<string, any> = {};
           for (const { key, valueExpr } of this.assignments) {
@@ -270,23 +315,25 @@ export class ShopifyLiquidEngine {
                 (valueExpr.startsWith('"') && valueExpr.endsWith('"'))) {
               resolvedAssignments[key] = valueExpr.slice(1, -1);
             } else {
-              const parts = valueExpr.split(".");
-              let value: any = parentContext;
-              for (const part of parts) {
-                value = value?.[part];
-              }
+              const value = resolveVar(valueExpr);
               resolvedAssignments[key] = value !== undefined ? value : valueExpr;
             }
           }
 
+          // Handle "with" syntax: passes single variable
+          if (this.withVar) {
+            const value = resolveVar(this.withVar.expr);
+            resolvedAssignments[this.withVar.alias] = value;
+            return await self.engine.parseAndRender(snippetContent, resolvedAssignments);
+          }
+
           // Handle "for" loop syntax
           if (this.forLoop) {
-            const parts = this.forLoop.arrayExpr.split(".");
-            let array: any = parentContext;
-            for (const part of parts) {
-              array = array?.[part];
-            }
-            if (!Array.isArray(array)) array = [];
+            const array = resolveVar(this.forLoop.arrayExpr);
+            if (!Array.isArray(array) || array.length === 0) return "";
+
+            // Get parent forloop if exists
+            const parentForloop = parentContext.forloop || null;
 
             let result = "";
             for (let i = 0; i < array.length; i++) {
@@ -301,6 +348,7 @@ export class ShopifyLiquidEngine {
                   length: array.length,
                   rindex: array.length - i,
                   rindex0: array.length - i - 1,
+                  parentloop: parentForloop,
                 },
               };
               result += await self.engine.parseAndRender(snippetContent, itemContext);
@@ -313,6 +361,8 @@ export class ShopifyLiquidEngine {
         } catch (error) {
           console.error(`Error rendering snippet ${this.snippetName}:`, error);
           return `<!-- Snippet Error: ${this.snippetName} -->`;
+        } finally {
+          self.renderDepth--;
         }
       },
     });
@@ -897,21 +947,100 @@ export class ShopifyLiquidEngine {
       return val;
     });
 
-    // Image filters
+    // Image filters with size support
+    // Shopify sizes: master, grande, large, medium, compact, small, thumb, icon, pico, or NxM
+    const sizeMap: Record<string, string> = {
+      pico: "16x16",
+      icon: "32x32",
+      thumb: "50x50",
+      small: "100x100",
+      compact: "160x160",
+      medium: "240x240",
+      large: "480x480",
+      grande: "600x600",
+      original: "",
+      master: "",
+    };
+
     this.engine.registerFilter("img_url", (image: any, size?: string) => {
-      if (typeof image === "string") return image;
-      return image?.src || "/placeholder.jpg";
+      let src = "";
+      if (typeof image === "string") {
+        src = image;
+      } else if (image?.src) {
+        src = image.src;
+      } else if (image?.url) {
+        src = image.url;
+      } else {
+        return "/placeholder.jpg";
+      }
+
+      // If no size or master/original, return as-is
+      if (!size || size === "master" || size === "original") {
+        return src;
+      }
+
+      // Convert named size to dimensions
+      const dimensions = sizeMap[size] || size;
+
+      // For Shopify CDN URLs, append size suffix
+      if (src.includes("cdn.shopify.com") || src.includes("shopifycdn.com")) {
+        // Insert size before file extension
+        const extMatch = src.match(/(\.[a-z]+)(\?.*)?$/i);
+        if (extMatch) {
+          return src.replace(extMatch[0], `_${dimensions}${extMatch[1]}${extMatch[2] || ""}`);
+        }
+      }
+
+      // For local/other URLs, add query param
+      const separator = src.includes("?") ? "&" : "?";
+      return `${src}${separator}size=${dimensions}`;
     });
 
     this.engine.registerFilter("image_url", (image: any, options?: any) => {
-      if (typeof image === "string") return image;
-      return image?.src || "/placeholder.jpg";
+      let src = "";
+      if (typeof image === "string") {
+        src = image;
+      } else if (image?.src) {
+        src = image.src;
+      } else if (image?.url) {
+        src = image.url;
+      } else {
+        return "/placeholder.jpg";
+      }
+
+      // Handle width/height options
+      if (options && typeof options === "object") {
+        const params: string[] = [];
+        if (options.width) params.push(`width=${options.width}`);
+        if (options.height) params.push(`height=${options.height}`);
+        if (options.crop) params.push(`crop=${options.crop}`);
+        if (options.format) params.push(`format=${options.format}`);
+
+        if (params.length > 0) {
+          const separator = src.includes("?") ? "&" : "?";
+          return `${src}${separator}${params.join("&")}`;
+        }
+      }
+
+      return src;
+    });
+
+    this.engine.registerFilter("img_tag", (url: string, alt?: string, cls?: string) => {
+      const altText = alt || "";
+      const className = cls || "";
+      return `<img src="${url}" alt="${altText}" class="${className}" loading="lazy">`;
     });
 
     this.engine.registerFilter("image_tag", (url: string, options?: any) => {
       const alt = options?.alt || "";
       const cls = options?.class || "";
-      return `<img src="${url}" alt="${alt}" class="${cls}" loading="lazy">`;
+      const width = options?.width ? `width="${options.width}"` : "";
+      const height = options?.height ? `height="${options.height}"` : "";
+      const loading = options?.loading || "lazy";
+      const sizes = options?.sizes ? `sizes="${options.sizes}"` : "";
+      const srcset = options?.srcset ? `srcset="${options.srcset}"` : "";
+
+      return `<img src="${url}" alt="${alt}" class="${cls}" ${width} ${height} ${sizes} ${srcset} loading="${loading}">`.replace(/\s+/g, " ").trim();
     });
 
     // File URL
@@ -1054,25 +1183,189 @@ export class ShopifyLiquidEngine {
       return `<script src="${url}"></script>`;
     });
 
-    // Color filters
+    // Color parsing helper
+    const parseColor = (color: string): { r: number; g: number; b: number } | null => {
+      if (!color) return null;
+      color = color.trim();
+
+      // Hex format
+      const hexMatch = color.match(/^#?([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/i);
+      if (hexMatch) {
+        return {
+          r: parseInt(hexMatch[1], 16),
+          g: parseInt(hexMatch[2], 16),
+          b: parseInt(hexMatch[3], 16),
+        };
+      }
+
+      // Short hex format
+      const shortHexMatch = color.match(/^#?([a-f0-9])([a-f0-9])([a-f0-9])$/i);
+      if (shortHexMatch) {
+        return {
+          r: parseInt(shortHexMatch[1] + shortHexMatch[1], 16),
+          g: parseInt(shortHexMatch[2] + shortHexMatch[2], 16),
+          b: parseInt(shortHexMatch[3] + shortHexMatch[3], 16),
+        };
+      }
+
+      // rgb/rgba format
+      const rgbMatch = color.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+      if (rgbMatch) {
+        return {
+          r: parseInt(rgbMatch[1], 10),
+          g: parseInt(rgbMatch[2], 10),
+          b: parseInt(rgbMatch[3], 10),
+        };
+      }
+
+      return null;
+    };
+
+    // RGB to HSL conversion
+    const rgbToHsl = (r: number, g: number, b: number): { h: number; s: number; l: number } => {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h = 0, s: number;
+      const l = (max + min) / 2;
+      if (max === min) {
+        h = s = 0;
+      } else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+          case g: h = ((b - r) / d + 2) / 6; break;
+          case b: h = ((r - g) / d + 4) / 6; break;
+        }
+      }
+      return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+    };
+
+    // HSL to RGB conversion
+    const hslToRgb = (h: number, s: number, l: number): { r: number; g: number; b: number } => {
+      h /= 360; s /= 100; l /= 100;
+      let r: number, g: number, b: number;
+      if (s === 0) {
+        r = g = b = l;
+      } else {
+        const hue2rgb = (p: number, q: number, t: number) => {
+          if (t < 0) t += 1;
+          if (t > 1) t -= 1;
+          if (t < 1/6) return p + (q - p) * 6 * t;
+          if (t < 1/2) return q;
+          if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+          return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+      }
+      return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+    };
+
     this.engine.registerFilter("color_to_rgb", (color: string) => {
-      return color;
+      const rgb = parseColor(color);
+      if (!rgb) return color;
+      return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
     });
 
     this.engine.registerFilter("color_to_hex", (color: string) => {
-      return color;
+      const rgb = parseColor(color);
+      if (!rgb) return color;
+      return `#${rgb.r.toString(16).padStart(2, "0")}${rgb.g.toString(16).padStart(2, "0")}${rgb.b.toString(16).padStart(2, "0")}`;
+    });
+
+    this.engine.registerFilter("color_to_hsl", (color: string) => {
+      const rgb = parseColor(color);
+      if (!rgb) return color;
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      return `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`;
+    });
+
+    this.engine.registerFilter("color_extract", (color: string, component: string) => {
+      const rgb = parseColor(color);
+      if (!rgb) return 0;
+      switch (component) {
+        case "red": return rgb.r;
+        case "green": return rgb.g;
+        case "blue": return rgb.b;
+        case "hue": return rgbToHsl(rgb.r, rgb.g, rgb.b).h;
+        case "saturation": return rgbToHsl(rgb.r, rgb.g, rgb.b).s;
+        case "lightness": return rgbToHsl(rgb.r, rgb.g, rgb.b).l;
+        default: return 0;
+      }
+    });
+
+    this.engine.registerFilter("color_brightness", (color: string) => {
+      const rgb = parseColor(color);
+      if (!rgb) return 0;
+      // Using perceived brightness formula
+      return Math.round((rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000);
     });
 
     this.engine.registerFilter("color_lighten", (color: string, amount: number) => {
-      return color;
+      const rgb = parseColor(color);
+      if (!rgb) return color;
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      hsl.l = Math.min(100, hsl.l + (amount || 0));
+      const newRgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+      return `#${newRgb.r.toString(16).padStart(2, "0")}${newRgb.g.toString(16).padStart(2, "0")}${newRgb.b.toString(16).padStart(2, "0")}`;
     });
 
     this.engine.registerFilter("color_darken", (color: string, amount: number) => {
-      return color;
+      const rgb = parseColor(color);
+      if (!rgb) return color;
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      hsl.l = Math.max(0, hsl.l - (amount || 0));
+      const newRgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+      return `#${newRgb.r.toString(16).padStart(2, "0")}${newRgb.g.toString(16).padStart(2, "0")}${newRgb.b.toString(16).padStart(2, "0")}`;
+    });
+
+    this.engine.registerFilter("color_saturate", (color: string, amount: number) => {
+      const rgb = parseColor(color);
+      if (!rgb) return color;
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      hsl.s = Math.min(100, hsl.s + (amount || 0));
+      const newRgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+      return `#${newRgb.r.toString(16).padStart(2, "0")}${newRgb.g.toString(16).padStart(2, "0")}${newRgb.b.toString(16).padStart(2, "0")}`;
+    });
+
+    this.engine.registerFilter("color_desaturate", (color: string, amount: number) => {
+      const rgb = parseColor(color);
+      if (!rgb) return color;
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      hsl.s = Math.max(0, hsl.s - (amount || 0));
+      const newRgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+      return `#${newRgb.r.toString(16).padStart(2, "0")}${newRgb.g.toString(16).padStart(2, "0")}${newRgb.b.toString(16).padStart(2, "0")}`;
     });
 
     this.engine.registerFilter("color_modify", (color: string, attr: string, value: number) => {
-      return color;
+      const rgb = parseColor(color);
+      if (!rgb) return color;
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      switch (attr) {
+        case "hue": hsl.h = value % 360; break;
+        case "saturation": hsl.s = Math.max(0, Math.min(100, value)); break;
+        case "lightness": hsl.l = Math.max(0, Math.min(100, value)); break;
+        case "red": rgb.r = Math.max(0, Math.min(255, value));
+          return `#${rgb.r.toString(16).padStart(2, "0")}${rgb.g.toString(16).padStart(2, "0")}${rgb.b.toString(16).padStart(2, "0")}`;
+        case "green": rgb.g = Math.max(0, Math.min(255, value));
+          return `#${rgb.r.toString(16).padStart(2, "0")}${rgb.g.toString(16).padStart(2, "0")}${rgb.b.toString(16).padStart(2, "0")}`;
+        case "blue": rgb.b = Math.max(0, Math.min(255, value));
+          return `#${rgb.r.toString(16).padStart(2, "0")}${rgb.g.toString(16).padStart(2, "0")}${rgb.b.toString(16).padStart(2, "0")}`;
+      }
+      const newRgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+      return `#${newRgb.r.toString(16).padStart(2, "0")}${newRgb.g.toString(16).padStart(2, "0")}${newRgb.b.toString(16).padStart(2, "0")}`;
+    });
+
+    this.engine.registerFilter("color_contrast", (color: string) => {
+      const rgb = parseColor(color);
+      if (!rgb) return "#000000";
+      // Calculate relative luminance and return contrasting color
+      const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+      return brightness > 128 ? "#000000" : "#ffffff";
     });
 
     // Font filters
@@ -1159,10 +1452,6 @@ export class ShopifyLiquidEngine {
       return `<!-- Section not found: ${safeType} -->`;
     }
 
-    let sectionContent = fs.readFileSync(sectionPath, "utf-8");
-
-    // Extract and parse schema
-    const schemaMatch = sectionContent.match(/\{%[-\s]*schema[-\s]*%\}([\s\S]*?)\{%[-\s]*endschema[-\s]*%\}/);
     let sectionSchema: any = {};
     if (schemaMatch) {
       try {
