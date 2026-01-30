@@ -54,13 +54,12 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     remix({
-      ssr: false, // SPA mode - no SSR, no __manifest fetch, no hydration issues
       ignoredRouteFiles: ["**/.*"],
       future: {
         v3_fetcherPersist: true,
         v3_relativeSplatPath: true,
         v3_throwAbortReason: true,
-        v3_lazyRouteDiscovery: true,
+        v3_lazyRouteDiscovery: false, // Disable to stop __manifest fetch
         v3_singleFetch: false,
         v3_routeConfig: true,
       },
