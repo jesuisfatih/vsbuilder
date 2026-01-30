@@ -2718,3 +2718,83 @@
   color: var(--p-color-text-secondary);
   font-size: var(--p-font-size-300);
 }
+
+/* ===== VISUAL CANVAS STYLES ===== */
+
+.visual-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-content {
+  padding: 0;
+}
+
+.canvas-section-group {
+  margin-bottom: 0;
+}
+
+/* Pattern backgrounds */
+.bg-pattern-grid {
+  background-image:
+    linear-gradient(rgba(255,255,255,.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.bg-pattern-dots {
+  background-image: radial-gradient(circle, rgba(255,255,255,.1) 1px, transparent 1px);
+  background-size: 12px 12px;
+}
+
+.bg-pattern-diagonal {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 10px,
+    rgba(255,255,255,.05) 10px,
+    rgba(255,255,255,.05) 20px
+  );
+}
+
+/* Section block transitions */
+.section-block {
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.section-block:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.section-block.ring-2 {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3);
+}
+
+/* Line clamp utility */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Canvas scrollbar */
+.visual-canvas::-webkit-scrollbar {
+  width: 8px;
+}
+
+.visual-canvas::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.visual-canvas::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.2);
+  border-radius: 4px;
+}
+
+.visual-canvas::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.3);
+}

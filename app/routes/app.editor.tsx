@@ -22,9 +22,6 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  ArrowLeftIcon,
-  ArrowPathIcon,
-  ArrowRightIcon,
   ArrowTopRightOnSquareIcon,
   ArrowUturnLeftIcon,
   ArrowUturnRightIcon,
@@ -38,7 +35,6 @@ import {
   DocumentTextIcon,
   EyeIcon,
   EyeSlashIcon,
-  GlobeAltIcon,
   MagnifyingGlassIcon,
   PhotoIcon,
   PlusCircleIcon,
@@ -53,6 +49,7 @@ import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { VisualCanvas } from "../components/VisualCanvas";
 import {
   getDefaultSettings,
   SECTION_CATEGORIES,
@@ -2327,71 +2324,9 @@ export default function Editor() {
             </div>
           </aside>
 
-          {/* MAIN PREVIEW */}
+          {/* MAIN PREVIEW - Visual Canvas */}
           <main className="editor-main">
-            <div className="editor-preview">
-              {/* Browser Controls */}
-              <div className="editor-browser-controls">
-                <div className="editor-browser-controls__nav">
-                  <button
-                    className="editor-browser-controls__btn"
-                    onClick={() => iframeRef.current?.contentWindow?.history.back()}
-                    title="Go back"
-                  >
-                    <ArrowLeftIcon className="w-4 h-4" />
-                  </button>
-                  <button
-                    className="editor-browser-controls__btn"
-                    onClick={() => iframeRef.current?.contentWindow?.history.forward()}
-                    title="Go forward"
-                  >
-                    <ArrowRightIcon className="w-4 h-4" />
-                  </button>
-                  <button
-                    className="editor-browser-controls__btn"
-                    onClick={() => iframeRef.current?.contentWindow?.location.reload()}
-                    title="Refresh preview"
-                  >
-                    <ArrowPathIcon className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="editor-browser-controls__url">
-                  <GlobeAltIcon className="w-4 h-4" />
-                  <span className="editor-browser-controls__url-text">
-                    {store.previewUrl?.replace(/^https?:\/\//, '').split('?')[0] || 'Loading...'}
-                  </span>
-                </div>
-                <div className="editor-browser-controls__actions">
-                  <a
-                    href={store.previewUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="editor-browser-controls__btn"
-                    title="Open in new tab"
-                  >
-                    <ArrowTopRightOnSquareIcon className="w-4 h-4" />
-                  </a>
-                </div>
-              </div>
-
-              {/* Preview Frame */}
-              <motion.div
-                layout
-                transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                className={clsx(
-                  "editor-preview__frame",
-                  store.device === "mobile" && "editor-preview__frame--mobile"
-                )}
-              >
-                <iframe
-                  ref={iframeRef}
-                  className="editor-preview__iframe"
-                  title="Store preview"
-                  // Remove src to prevent double loading or auth issues
-                  // src={store.previewUrl}
-                />
-              </motion.div>
-            </div>
+            <VisualCanvas />
           </main>
 
           {/* INSPECTOR */}
