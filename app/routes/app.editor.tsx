@@ -1662,7 +1662,7 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
 // ============================================
 
 export default function Editor() {
-  const { initialData, shop, themeId, themeName, themeRole, sourceThemeId, previewUrl, currentTemplate, availableTemplates, error, apiConfig } = useLoaderData<typeof loader>();
+  const { initialData, shop, themeId, themeName, themeRole, sourceThemeId, previewUrl, currentTemplate, availableTemplates, error } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const fetcher = useFetcher();
   const renderFetcher = useFetcher();
@@ -1671,13 +1671,23 @@ export default function Editor() {
   const store = useEditorStore();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // API configuration from loader (SSR-safe)
-  // Default to admin routes if apiConfig is not provided
-  const api = apiConfig || {
-    syncCheck: '/api/theme-sync',
-    syncAction: '/api/theme-sync',
-    renderLocal: '/api/render-local',
-    render: '/api/render',
+  // Helper function to get correct API paths - MUST be called inside useEffect (client-side only)
+  const getApiPaths = () => {
+    const isProxyMode = window.location.pathname.startsWith('/proxy/');
+    if (isProxyMode) {
+      return {
+        syncCheck: '/proxy/api.sync',
+        syncAction: '/proxy/api.sync',
+        renderLocal: '/proxy/api.render-local',
+        render: '/proxy/api.render',
+      };
+    }
+    return {
+      syncCheck: '/api/theme-sync',
+      syncAction: '/api/theme-sync',
+      renderLocal: '/api/render-local',
+      render: '/api/render',
+    };
   };
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -1732,6 +1742,10 @@ export default function Editor() {
   // Initialize store
   // Check if theme is synced locally and sync if needed
   useEffect(() => {
+    // Get API paths at runtime (client-side only, window is available)
+    const api = getApiPaths();
+    console.log('[Editor] API paths:', api);
+
     // Check sync status
     fetch(`${api.syncCheck}?themeId=${themeId}`)
       .then(res => res.json())
@@ -1757,6 +1771,7 @@ export default function Editor() {
   // Handle sync completion
   useEffect(() => {
     if (syncFetcher.data && (syncFetcher.data as any).success) {
+      const api = getApiPaths();
       setThemeSynced(true);
       setSyncing(false);
       // Now load the preview
@@ -1799,6 +1814,7 @@ export default function Editor() {
 
     // Debounce the render request
     const timer = setTimeout(() => {
+      const api = getApiPaths();
       const { sectionId, groupType } = store.selectedPath!;
       const section = store.getSection(sectionId).section;
       if (!section) return;
