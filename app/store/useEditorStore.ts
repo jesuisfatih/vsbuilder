@@ -108,7 +108,7 @@ interface EditorState {
   updateSectionSettings: (sectionId: string, settings: Partial<SectionSettings>) => void;
   toggleSectionVisibility: (sectionId: string) => void;
   deleteSection: (groupType: GroupType, sectionId: string) => void;
-  addSection: (groupType: GroupType, sectionType: string, afterId?: string) => string;
+  addSection: (groupType: GroupType, sectionType: string, afterId?: string, defaultSettings?: SectionSettings) => string;
   moveSection: (groupType: GroupType, fromIndex: number, toIndex: number) => void;
   moveSectionBetweenGroups: (fromGroup: GroupType, toGroup: GroupType, sectionId: string, toIndex: number) => void;
 
@@ -350,16 +350,16 @@ export const useEditorStore = create<EditorState>()(
         }
       }),
 
-      addSection: (groupType, sectionType, afterId) => {
+      addSection: (groupType, sectionType, afterId, defaultSettings = {}) => {
         const newId = generateId();
 
         set((state) => {
           const groupKey = getGroupKey(groupType);
 
-          // Create new section
+          // Create new section with default settings
           state[groupKey].sections[newId] = {
             type: sectionType,
-            settings: {},
+            settings: { ...defaultSettings },
             blocks: {},
             block_order: [],
           };

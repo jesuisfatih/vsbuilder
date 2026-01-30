@@ -3,46 +3,110 @@
  * Polaris Design System + Custom Online Store UI
  */
 
-/* ===== POLARIS TOKENS (From example.css) ===== */
+/* ===== POLARIS TOKENS (From Shopify Polaris example.css) ===== */
 :root, .editor-theme-light {
-  /* Colors - Light Theme */
+  /* Colors - Light Theme - Backgrounds */
   --p-color-bg: rgba(241, 241, 241, 1);
+  --p-color-bg-inverse: rgba(26, 26, 26, 1);
   --p-color-bg-surface: rgba(255, 255, 255, 1);
-  --p-color-bg-surface-secondary: rgba(247, 247, 247, 1);
   --p-color-bg-surface-hover: rgba(247, 247, 247, 1);
   --p-color-bg-surface-active: rgba(243, 243, 243, 1);
   --p-color-bg-surface-selected: rgba(241, 241, 241, 1);
+  --p-color-bg-surface-secondary: rgba(247, 247, 247, 1);
+  --p-color-bg-surface-secondary-hover: rgba(241, 241, 241, 1);
+  --p-color-bg-surface-tertiary: rgba(243, 243, 243, 1);
+  --p-color-bg-surface-success: rgba(205, 254, 212, 1);
+  --p-color-bg-surface-warning: rgba(255, 241, 227, 1);
+  --p-color-bg-surface-critical: rgba(254, 232, 235, 1);
+  --p-color-bg-surface-info: rgba(234, 244, 255, 1);
+  --p-color-bg-surface-highlight: rgba(240, 242, 255, 1);
+
+  /* Fill backgrounds */
   --p-color-bg-fill: rgba(255, 255, 255, 1);
+  --p-color-bg-fill-hover: rgba(250, 250, 250, 1);
+  --p-color-bg-fill-active: rgba(247, 247, 247, 1);
   --p-color-bg-fill-secondary: rgba(241, 241, 241, 1);
+  --p-color-bg-fill-secondary-hover: rgba(235, 235, 235, 1);
   --p-color-bg-fill-tertiary: rgba(227, 227, 227, 1);
   --p-color-bg-fill-tertiary-hover: rgba(212, 212, 212, 1);
+  --p-color-bg-fill-tertiary-active: rgba(204, 204, 204, 1);
   --p-color-bg-fill-brand: rgba(48, 48, 48, 1);
+  --p-color-bg-fill-brand-hover: rgba(26, 26, 26, 1);
   --p-color-bg-fill-brand-selected: rgba(48, 48, 48, 1);
+  --p-color-bg-fill-success: rgba(4, 123, 93, 1);
+  --p-color-bg-fill-success-secondary: rgba(175, 254, 191, 1);
+  --p-color-bg-fill-warning: rgba(255, 184, 0, 1);
+  --p-color-bg-fill-warning-secondary: rgba(255, 214, 164, 1);
+  --p-color-bg-fill-critical: rgba(199, 10, 36, 1);
+  --p-color-bg-fill-critical-secondary: rgba(254, 209, 215, 1);
+  --p-color-bg-fill-info: rgba(145, 208, 255, 1);
+  --p-color-bg-fill-highlight: rgba(0, 91, 211, 1);
+  --p-color-bg-fill-transparent: rgba(0, 0, 0, .02);
   --p-color-bg-fill-transparent-hover: rgba(0, 0, 0, .05);
   --p-color-bg-fill-transparent-active: rgba(0, 0, 0, .08);
+  --p-color-bg-fill-transparent-selected: rgba(0, 0, 0, .08);
+  --p-color-bg-fill-disabled: rgba(0, 0, 0, .05);
 
   /* Text colors */
   --p-color-text: rgba(48, 48, 48, 1);
   --p-color-text-secondary: rgba(97, 97, 97, 1);
   --p-color-text-disabled: rgba(181, 181, 181, 1);
+  --p-color-text-link: rgba(0, 91, 211, 1);
+  --p-color-text-link-hover: rgba(0, 66, 153, 1);
+  --p-color-text-brand: rgba(74, 74, 74, 1);
   --p-color-text-brand-on-bg-fill: rgba(255, 255, 255, 1);
+  --p-color-text-success: rgba(1, 75, 64, 1);
+  --p-color-text-success-on-bg-fill: rgba(250, 255, 251, 1);
+  --p-color-text-warning: rgba(94, 66, 0, 1);
+  --p-color-text-critical: rgba(142, 11, 33, 1);
+  --p-color-text-critical-on-bg-fill: rgba(255, 250, 251, 1);
   --p-color-text-highlight: rgba(0, 91, 211, 1);
+  --p-color-text-inverse: rgba(227, 227, 227, 1);
 
   /* Border colors */
   --p-color-border: rgba(227, 227, 227, 1);
+  --p-color-border-hover: rgba(204, 204, 204, 1);
   --p-color-border-secondary: rgba(235, 235, 235, 1);
+  --p-color-border-tertiary: rgba(204, 204, 204, 1);
   --p-color-border-focus: rgba(0, 91, 211, 1);
   --p-color-border-highlight: rgba(0, 91, 211, 1);
+  --p-color-border-success: rgba(146, 252, 172, 1);
+  --p-color-border-warning: rgba(255, 200, 121, 1);
+  --p-color-border-critical: rgba(254, 193, 199, 1);
 
   /* Icon colors */
   --p-color-icon: rgba(74, 74, 74, 1);
+  --p-color-icon-hover: rgba(48, 48, 48, 1);
+  --p-color-icon-active: rgba(26, 26, 26, 1);
   --p-color-icon-secondary: rgba(138, 138, 138, 1);
+  --p-color-icon-secondary-hover: rgba(97, 97, 97, 1);
+  --p-color-icon-disabled: rgba(204, 204, 204, 1);
+  --p-color-icon-success: rgba(4, 123, 93, 1);
+  --p-color-icon-warning: rgba(178, 132, 0, 1);
+  --p-color-icon-critical: rgba(226, 44, 56, 1);
+  --p-color-icon-highlight: rgba(0, 91, 211, 1);
 
-  /* Navigation */
+  /* Navigation colors */
   --p-color-nav-bg: rgba(235, 235, 235, 1);
+  --p-color-nav-bg-surface: rgba(0, 0, 0, .02);
   --p-color-nav-bg-surface-hover: rgba(241, 241, 241, 1);
   --p-color-nav-bg-surface-active: rgba(250, 250, 250, 1);
   --p-color-nav-bg-surface-selected: rgba(250, 250, 250, 1);
+
+  /* Input colors */
+  --p-color-input-bg-surface: rgba(253, 253, 253, 1);
+  --p-color-input-bg-surface-hover: rgba(250, 250, 250, 1);
+  --p-color-input-bg-surface-active: rgba(247, 247, 247, 1);
+  --p-color-input-border: rgba(138, 138, 138, 1);
+  --p-color-input-border-hover: rgba(97, 97, 97, 1);
+  --p-color-input-border-active: rgba(26, 26, 26, 1);
+
+  /* Scrollbar colors */
+  --p-color-scrollbar-thumb-bg: rgba(181, 181, 181, 1);
+  --p-color-scrollbar-thumb-bg-hover: rgba(138, 138, 138, 1);
+
+  /* Backdrop */
+  --p-color-backdrop-bg: rgba(0, 0, 0, .71);
 
   /* Spacing (Polaris tokens) */
   --p-space-0: 0rem;
@@ -51,16 +115,22 @@
   --p-space-100: .25rem;
   --p-space-150: .375rem;
   --p-space-200: .5rem;
+  --p-space-250: .625rem;
   --p-space-300: .75rem;
   --p-space-400: 1rem;
   --p-space-500: 1.25rem;
   --p-space-600: 1.5rem;
+  --p-space-800: 2rem;
+  --p-space-1000: 2.5rem;
 
   /* Border radius */
+  --p-border-radius-0: 0rem;
+  --p-border-radius-050: .125rem;
   --p-border-radius-100: .25rem;
   --p-border-radius-150: .375rem;
   --p-border-radius-200: .5rem;
   --p-border-radius-300: .75rem;
+  --p-border-radius-400: 1rem;
   --p-border-radius-full: 624.9375rem;
 
   /* Font */
@@ -70,23 +140,40 @@
   --p-font-size-325: .8125rem;
   --p-font-size-350: .875rem;
   --p-font-size-400: 1rem;
+  --p-font-size-450: 1.125rem;
+  --p-font-size-500: 1.25rem;
   --p-font-weight-regular: 450;
   --p-font-weight-medium: 550;
   --p-font-weight-semibold: 600;
   --p-font-weight-bold: 650;
   --p-font-line-height-400: 1rem;
   --p-font-line-height-500: 1.25rem;
+  --p-font-line-height-600: 1.5rem;
 
   /* Shadows */
+  --p-shadow-0: none;
   --p-shadow-100: 0rem .3125rem .3125rem -.15625rem rgba(0, 0, 0, .03), 0rem .1875rem .1875rem -.09375rem rgba(0, 0, 0, .02), 0rem .125rem .125rem -.0625rem rgba(0, 0, 0, .02), 0rem .0625rem .0625rem -.03125rem rgba(0, 0, 0, .03), 0rem .03125rem .03125rem 0rem rgba(0, 0, 0, .04), 0rem 0rem 0rem .0625rem rgba(0, 0, 0, .06);
   --p-shadow-200: 0rem .5rem .625rem -.3125rem rgba(0, 0, 0, .08), 0rem .3125rem .3125rem -.15625rem rgba(0, 0, 0, .03), 0rem .1875rem .1875rem -.09375rem rgba(0, 0, 0, .02), 0rem .125rem .125rem -.0625rem rgba(0, 0, 0, .02), 0rem .0625rem .0625rem -.03125rem rgba(0, 0, 0, .03), 0rem .03125rem .03125rem 0rem rgba(0, 0, 0, .04), 0rem 0rem 0rem .0625rem rgba(0, 0, 0, .06);
+  --p-shadow-300: 0rem .5rem 1.5rem -.5rem rgba(0, 0, 0, .28), 0rem .5rem 1rem -.25rem rgba(0, 0, 0, .05), 0rem .1875rem .375rem 0rem rgba(0, 0, 0, .05), 0rem .125rem .25rem 0rem rgba(0, 0, 0, .05), 0rem .0625rem .125rem 0rem rgba(0, 0, 0, .05), 0rem 0rem 0rem .0625rem rgba(0, 0, 0, .06);
+  --p-shadow-400: 0rem 1.25rem 2rem -.75rem rgba(0, 0, 0, .2), 0rem .625rem 1rem -.375rem rgba(0, 0, 0, .08), 0rem .1875rem .375rem 0rem rgba(0, 0, 0, .08), 0rem .125rem .25rem 0rem rgba(0, 0, 0, .08), 0rem .0625rem .125rem 0rem rgba(0, 0, 0, .05), 0rem 0rem 0rem .0625rem rgba(0, 0, 0, .06);
+  --p-shadow-500: 0rem 1.5rem 2.25rem -.75rem rgba(0, 0, 0, .12), 0rem 1.5rem 1.5rem -.75rem rgba(0, 0, 0, .08), 0rem .5rem 1rem -.375rem rgba(0, 0, 0, .08), 0rem .1875rem .375rem 0rem rgba(0, 0, 0, .08), 0rem .125rem .25rem 0rem rgba(0, 0, 0, .08), 0rem .0625rem .125rem 0rem rgba(0, 0, 0, .05), 0rem 0rem 0rem .0625rem rgba(0, 0, 0, .06);
+  --p-shadow-600: 0rem 1.5rem 3.5rem -.75rem rgba(0, 0, 0, .24), 0rem 1.5rem 1.5rem -.75rem rgba(0, 0, 0, .12), 0rem .1875rem .375rem 0rem rgba(0, 0, 0, .05), 0rem .125rem .25rem 0rem rgba(0, 0, 0, .05), 0rem .0625rem .125rem 0rem rgba(0, 0, 0, .05), 0rem 0rem 0rem .0625rem rgba(0, 0, 0, .07);
+  --p-shadow-inset-100: 0rem .0625rem .125rem 0rem rgba(26, 26, 26, .15) inset, 0rem .0625rem .0625rem 0rem rgba(26, 26, 26, .15) inset;
+  --p-shadow-inset-200: 0rem .125rem .0625rem 0rem rgba(26, 26, 26, .2) inset, .0625rem 0rem .0625rem 0rem rgba(26, 26, 26, .12) inset, -.0625rem 0rem .0625rem 0rem rgba(26, 26, 26, .12) inset;
+  --p-shadow-button: 0rem -.0625rem 0rem 0rem #b5b5b5 inset, 0rem 0rem 0rem .0625rem rgba(0, 0, 0, .1) inset, 0rem .03125rem 0rem .09375rem #FFF inset;
 
   /* Motion */
+  --p-motion-duration-0: 0ms;
+  --p-motion-duration-50: 50ms;
   --p-motion-duration-100: .1s;
   --p-motion-duration-150: .15s;
   --p-motion-duration-200: .2s;
+  --p-motion-duration-250: .25s;
+  --p-motion-duration-300: .3s;
   --p-motion-ease: cubic-bezier(.25, .1, .25, 1);
+  --p-motion-ease-in: cubic-bezier(.42, 0, 1, 1);
   --p-motion-ease-out: cubic-bezier(.19, .91, .38, 1);
+  --p-motion-ease-in-out: cubic-bezier(.42, 0, .58, 1);
 
   /* Editor-specific custom tokens - Match Shopify OSUI exactly */
   --editor-topbar-height: 3.5rem;

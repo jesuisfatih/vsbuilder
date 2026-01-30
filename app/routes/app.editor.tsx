@@ -44,6 +44,11 @@ import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
+import {
+  getDefaultSettings,
+  SECTION_CATEGORIES,
+  SECTION_TEMPLATES
+} from "../config/sectionTemplates";
 import { authenticate } from "../shopify.server";
 import {
   useEditorStore,
@@ -453,28 +458,8 @@ const SectionGroup = ({ groupType, label, sections, order }: SectionGroupProps) 
 // SECTION PICKER MODAL
 // ============================================
 
-const SECTION_TEMPLATES = [
-  { type: "hero-banner", name: "Hero Banner", category: "Featured" },
-  { type: "featured-collection", name: "Featured Collection", category: "Featured" },
-  { type: "featured-product", name: "Featured Product", category: "Featured" },
-  { type: "slideshow", name: "Slideshow", category: "Featured" },
-  { type: "rich-text", name: "Rich Text", category: "Text" },
-  { type: "text-columns", name: "Text Columns with Images", category: "Text" },
-  { type: "newsletter", name: "Newsletter", category: "Text" },
-  { type: "image-with-text", name: "Image with Text", category: "Image" },
-  { type: "image-banner", name: "Image Banner", category: "Image" },
-  { type: "gallery", name: "Gallery", category: "Image" },
-  { type: "logo-list", name: "Logo List", category: "Image" },
-  { type: "collection-list", name: "Collection List", category: "Collection" },
-  { type: "products-grid", name: "Products Grid", category: "Collection" },
-  { type: "collapsible-content", name: "Collapsible Content", category: "Interactive" },
-  { type: "contact-form", name: "Contact Form", category: "Interactive" },
-  { type: "video", name: "Video", category: "Media" },
-  { type: "custom-liquid", name: "Custom Liquid", category: "Advanced" },
-  { type: "custom-html", name: "Custom HTML", category: "Advanced" },
-];
-
-const CATEGORIES = [...new Set(SECTION_TEMPLATES.map((s) => s.category))];
+// Categories derived from config
+const CATEGORIES = SECTION_CATEGORIES.map((c) => c.name);
 
 interface SectionPickerModalProps {
   isOpen: boolean;
@@ -489,13 +474,17 @@ const SectionPickerModal = ({ isOpen, onClose, groupType }: SectionPickerModalPr
 
   const filteredSections = SECTION_TEMPLATES.filter((section) => {
     const matchesSearch = section.name.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = !activeCategory || section.category === activeCategory;
+    const matchesCategory = !activeCategory ||
+      section.category.toLowerCase() === activeCategory.toLowerCase();
     return matchesSearch && matchesCategory;
   });
 
   const handleSelect = (sectionType: string) => {
-    store.addSection(groupType, sectionType);
+    const defaultSettings = getDefaultSettings(sectionType);
+    store.addSection(groupType, sectionType, undefined, defaultSettings as Record<string, string | number | boolean | null>);
     onClose();
+    setSearch("");
+    setActiveCategory(null);
   };
 
   if (!isOpen) return null;
