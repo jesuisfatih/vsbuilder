@@ -273,6 +273,9 @@ export async function downloadTemplateData(
   }
 
   try {
+    // Debug: log first 200 chars of content to see what we're getting
+    console.log('[Theme] Template content preview:', files[0].content.substring(0, 200));
+
     const parsed = JSON.parse(files[0].content);
     console.log('[Theme] Parsed template:', templateName, '- sections:', Object.keys(parsed.sections || {}).length);
 
@@ -283,6 +286,7 @@ export async function downloadTemplateData(
     };
   } catch (error) {
     console.error('[Theme] Error parsing template:', error);
+    console.error('[Theme] Content that failed to parse:', files[0].content.substring(0, 500));
     return null;
   }
 }
