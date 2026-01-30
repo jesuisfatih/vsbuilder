@@ -70,6 +70,28 @@ function toGid(id: string): string {
   return `gid://shopify/OnlineStoreTheme/${id}`;
 }
 
+/**
+ * Strip CSS-style block comments from JSON content.
+ * Shopify sometimes adds auto-generated comments at the start of JSON files:
+ * /* ... * /
+ * { "sections": ... }
+ */
+function stripJsonComments(content: string): string {
+  if (!content) return content;
+
+  // Find the first '{' which starts the actual JSON
+  const jsonStart = content.indexOf('{');
+  if (jsonStart === -1) return content;
+
+  // If content starts with '{', no comments to strip
+  if (content.trimStart().startsWith('{')) {
+    return content.trimStart();
+  }
+
+  // Extract from the first '{' to the end
+  return content.substring(jsonStart);
+}
+
 // ============================================
 // GET ALL THEMES
 // ============================================
@@ -274,10 +296,11 @@ export async function downloadTemplateData(
   }
 
   try {
-    // Debug: log first 200 chars of content to see what we're getting
-    console.log('[Theme] Template content preview:', files[0].content.substring(0, 200));
+    // Strip any CSS comments that Shopify auto-injects at the beginning
+    const cleanContent = stripJsonComments(files[0].content);
+    console.log('[Theme] Template content preview (cleaned):', cleanContent.substring(0, 200));
 
-    const parsed = JSON.parse(files[0].content);
+    const parsed = JSON.parse(cleanContent);
     console.log('[Theme] Parsed template:', templateName, '- sections:', Object.keys(parsed.sections || {}).length);
 
     return {
@@ -317,7 +340,9 @@ export async function downloadSectionGroup(
   }
 
   try {
-    const parsed = JSON.parse(files[0].content);
+    // Strip any CSS comments that Shopify auto-injects
+    const cleanContent = stripJsonComments(files[0].content);
+    const parsed = JSON.parse(cleanContent);
     console.log('[Theme] Parsed section group:', groupName, '- sections:', Object.keys(parsed.sections || {}).length);
 
     return {
@@ -347,7 +372,8 @@ export async function downloadSettingsData(admin: any, themeId: string): Promise
   }
 
   try {
-    return JSON.parse(files[0].content);
+    const cleanContent = stripJsonComments(files[0].content);
+    return JSON.parse(cleanContent);
   } catch (error) {
     console.error('[Theme] Error parsing settings data:', error);
     return null;
@@ -369,7 +395,8 @@ export async function downloadSettingsSchema(admin: any, themeId: string): Promi
   }
 
   try {
-    return JSON.parse(files[0].content);
+    const cleanContent = stripJsonComments(files[0].content);
+    return JSON.parse(cleanContent);
   } catch (error) {
     console.error('[Theme] Error parsing settings schema:', error);
     return [];
