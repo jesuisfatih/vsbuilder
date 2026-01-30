@@ -1652,9 +1652,11 @@ export default function Editor() {
   const store = useEditorStore();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Detect if running in App Proxy mode (mağaza domain) and use absolute URL for API calls
+  // Detect if running in App Proxy mode (mağaza domain) and use proxy API routes
   const isProxyMode = typeof window !== 'undefined' && window.location.pathname.startsWith('/proxy/');
-  const apiBase = isProxyMode ? 'https://vsbuilder.techifyboost.com' : '';
+  // In proxy mode: use /proxy/api.* routes which work with App Proxy
+  // In admin mode: use /api/* routes directly
+  const apiPrefix = isProxyMode ? '/proxy/api' : '/api';
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
@@ -1709,19 +1711,19 @@ export default function Editor() {
   // Check if theme is synced locally and sync if needed
   useEffect(() => {
     // Check sync status
-    fetch(`${apiBase}/api/theme-sync?themeId=${themeId}`)
+    fetch(`${apiPrefix}${isProxyMode ? '.sync' : '/theme-sync'}?themeId=${themeId}`)
       .then(res => res.json())
       .then(data => {
         if (data.synced) {
           setThemeSynced(true);
           // Load preview since theme is synced
-          previewFetcher.load(`${apiBase}/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
+          previewFetcher.load(`${apiPrefix}${isProxyMode ? '.render-local' : '/render-local'}?themeId=${themeId}&template=${currentTemplate}`);
         } else {
           // Theme not synced, trigger sync
           setSyncing(true);
           syncFetcher.submit(
             { themeId },
-            { method: "POST", action: `${apiBase}/api/theme-sync` }
+            { method: "POST", action: `${apiPrefix}${isProxyMode ? '.sync' : '/theme-sync'}` }
           );
         }
       })
@@ -1736,7 +1738,7 @@ export default function Editor() {
       setThemeSynced(true);
       setSyncing(false);
       // Now load the preview
-      previewFetcher.load(`${apiBase}/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
+      previewFetcher.load(`${apiPrefix}${isProxyMode ? '.render-local' : '/render-local'}?themeId=${themeId}&template=${currentTemplate}`);
     }
   }, [syncFetcher.data]);
 
@@ -1807,7 +1809,7 @@ export default function Editor() {
 
       // Add blocks? Advanced topic.
 
-      renderFetcher.load(`${apiBase}/api/render?${params.toString()}`);
+      renderFetcher.load(`${apiPrefix}${isProxyMode ? '.render' : '/render'}?${params.toString()}`);
     }, 500);
 
     return () => clearTimeout(timer);
@@ -2372,7 +2374,7 @@ export default function Editor() {
                     onClick={() => {
                       setIframeReady(false);
                       // Use local render API
-                      previewFetcher.load(`${apiBase}/api/render-local?themeId=${themeId}&template=${currentTemplate}`);
+                      previewFetcher.load(`${apiPrefix}${isProxyMode ? '.render-local' : '/render-local'}?themeId=${themeId}&template=${currentTemplate}`);
                     }}
                     className="editor-preview__refresh"
                     title="Refresh Preview"
