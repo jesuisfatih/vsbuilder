@@ -66,7 +66,7 @@ export default defineConfig({
     }),
     tsconfigPaths(),
   ],
-  base: "/proxy/",
+  base: "https://vsbuilder.techifyboost.com/proxy/",
   build: {
     assetsInlineLimit: 0,
     rollupOptions: {
