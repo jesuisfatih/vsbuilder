@@ -27,6 +27,7 @@ export interface SectionSettings {
 
 export interface Section {
   type: string;
+  label?: string;
   settings: SectionSettings;
   blocks?: Record<string, Block>;
   block_order?: string[];
@@ -111,6 +112,8 @@ interface EditorState {
   addSection: (groupType: GroupType, sectionType: string, afterId?: string, defaultSettings?: SectionSettings) => string;
   moveSection: (groupType: GroupType, fromIndex: number, toIndex: number) => void;
   moveSectionBetweenGroups: (fromGroup: GroupType, toGroup: GroupType, sectionId: string, toIndex: number) => void;
+  duplicateSection: (groupType: GroupType, sectionId: string) => string;
+  renameSectionLabel: (sectionId: string, label: string) => void;
 
   // Block Operations
   updateBlockSetting: (sectionId: string, blockId: string, key: string, value: any) => void;
@@ -411,6 +414,60 @@ export const useEditorStore = create<EditorState>()(
         state[toKey].order.splice(toIndex, 0, sectionId);
 
         state.isDirty = true;
+      }),
+
+      duplicateSection: (groupType, sectionId) => {
+        const newId = generateId();
+
+        set((state) => {
+          const groupKey = getGroupKey(groupType);
+          const original = state[groupKey].sections[sectionId];
+          if (!original) return;
+
+          // Deep clone the section
+          const duplicate: Section = JSON.parse(JSON.stringify(original));
+          duplicate.label = `${original.label || original.type} (copy)`;
+
+          // Clone blocks with new IDs
+          if (duplicate.blocks) {
+            const newBlocks: Record<string, Block> = {};
+            const newBlockOrder: string[] = [];
+
+            Object.entries(duplicate.blocks).forEach(([oldBlockId, block]) => {
+              const newBlockId = `block_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+              newBlocks[newBlockId] = { ...block };
+              newBlockOrder.push(newBlockId);
+            });
+
+            duplicate.blocks = newBlocks;
+            duplicate.block_order = newBlockOrder;
+          }
+
+          // Add to group
+          state[groupKey].sections[newId] = duplicate;
+
+          // Insert after original
+          const originalIndex = state[groupKey].order.indexOf(sectionId);
+          state[groupKey].order.splice(originalIndex + 1, 0, newId);
+
+          state.isDirty = true;
+        });
+
+        return newId;
+      },
+
+      renameSectionLabel: (sectionId, label) => set((state) => {
+        const groupKey = (() => {
+          if (state.template.sections[sectionId]) return 'template';
+          if (state.headerGroup.sections[sectionId]) return 'headerGroup';
+          if (state.footerGroup.sections[sectionId]) return 'footerGroup';
+          return null;
+        })();
+
+        if (groupKey && state[groupKey].sections[sectionId]) {
+          state[groupKey].sections[sectionId].label = label;
+          state.isDirty = true;
+        }
       }),
 
       // ========== BLOCK OPERATIONS ==========

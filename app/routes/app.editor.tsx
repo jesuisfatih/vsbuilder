@@ -26,15 +26,18 @@ import {
   ArrowUturnLeftIcon,
   ArrowUturnRightIcon,
   Bars2Icon,
+  CheckIcon,
   ChevronDownIcon,
   Cog6ToothIcon,
   ComputerDesktopIcon,
   DevicePhoneMobileIcon,
+  DocumentTextIcon,
   EyeIcon,
   EyeSlashIcon,
   MagnifyingGlassIcon,
   PhotoIcon,
   PlusCircleIcon,
+  ShoppingBagIcon,
   Square3Stack3DIcon,
   Squares2X2Icon,
   TrashIcon,
@@ -584,6 +587,215 @@ const SectionPickerModal = ({ isOpen, onClose, groupType }: SectionPickerModalPr
 };
 
 // ============================================
+// RESOURCE PICKER MODAL (Products, Collections, Files)
+// ============================================
+
+interface ResourceItem {
+  id: string;
+  title: string;
+  handle?: string;
+  price?: string;
+  meta?: string;
+  image?: string | null;
+  imageAlt?: string;
+  url?: string;
+  type: "product" | "collection" | "page" | "file";
+}
+
+interface ResourcePickerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSelect: (resource: ResourceItem) => void;
+  resourceType: "products" | "collections" | "pages" | "files";
+  title?: string;
+  selectedId?: string;
+}
+
+const ResourcePickerModal = ({
+  isOpen,
+  onClose,
+  onSelect,
+  resourceType,
+  title,
+  selectedId,
+}: ResourcePickerModalProps) => {
+  const [search, setSearch] = useState("");
+  const [items, setItems] = useState<ResourceItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+
+  const displayTitle = title || resourceType.charAt(0).toUpperCase() + resourceType.slice(1);
+
+  // Fetch resources
+  const fetchResources = useCallback(async (searchQuery: string, afterCursor?: string | null) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        type: resourceType,
+        search: searchQuery,
+        limit: "20",
+      });
+      if (afterCursor) params.set("cursor", afterCursor);
+
+      const response = await fetch(`/api/resources?${params}`);
+      const data = await response.json();
+
+      if (afterCursor) {
+        setItems(prev => [...prev, ...data.items]);
+      } else {
+        setItems(data.items || []);
+      }
+      setHasMore(data.pageInfo?.hasNextPage || false);
+      setCursor(data.pageInfo?.endCursor || null);
+    } catch (error) {
+      console.error("Failed to fetch resources:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [resourceType]);
+
+  // Initial load and search
+  useEffect(() => {
+    if (isOpen) {
+      const debounce = setTimeout(() => {
+        fetchResources(search, null);
+      }, 300);
+      return () => clearTimeout(debounce);
+    }
+  }, [isOpen, search, fetchResources]);
+
+  // Reset on close
+  useEffect(() => {
+    if (!isOpen) {
+      setSearch("");
+      setItems([]);
+      setCursor(null);
+    }
+  }, [isOpen]);
+
+  const handleSelect = (item: ResourceItem) => {
+    onSelect(item);
+    onClose();
+  };
+
+  const handleLoadMore = () => {
+    if (hasMore && cursor && !loading) {
+      fetchResources(search, cursor);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="editor-modal-overlay" onClick={onClose}>
+      <motion.div
+        className="editor-modal editor-resource-modal"
+        onClick={(e) => e.stopPropagation()}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+      >
+        {/* Header */}
+        <header className="editor-modal__header">
+          <h2 className="editor-modal__title">Select {displayTitle}</h2>
+          <button className="editor-modal__close" onClick={onClose}>
+            <XMarkIcon className="w-5 h-5" />
+          </button>
+        </header>
+
+        {/* Search */}
+        <div className="editor-modal__search">
+          <MagnifyingGlassIcon className="editor-modal__search-icon" />
+          <input
+            type="text"
+            placeholder={`Search ${resourceType}...`}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="editor-modal__search-input"
+            autoFocus
+          />
+        </div>
+
+        {/* Resource Grid */}
+        <div className="editor-modal__content editor-scrollbar">
+          {loading && items.length === 0 ? (
+            <div className="editor-empty-state">
+              <div className="editor-spinner" />
+              <p className="editor-empty-text">Loading...</p>
+            </div>
+          ) : items.length === 0 ? (
+            <div className="editor-empty-state">
+              <Square3Stack3DIcon className="editor-empty-state__icon" />
+              <p className="editor-empty-text">No {resourceType} found</p>
+            </div>
+          ) : (
+            <>
+              <div className="editor-resource-grid">
+                {items.map((item) => (
+                  <button
+                    key={item.id}
+                    className={clsx(
+                      "editor-resource-item",
+                      selectedId === item.id && "editor-resource-item--selected"
+                    )}
+                    onClick={() => handleSelect(item)}
+                  >
+                    {item.image || item.url ? (
+                      <img
+                        src={item.image || item.url}
+                        alt={item.imageAlt || item.title}
+                        className="editor-resource-item__image"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <div className="editor-resource-item__image editor-resource-item__image--placeholder">
+                        {resourceType === "products" && <ShoppingBagIcon className="w-8 h-8" />}
+                        {resourceType === "collections" && <Square3Stack3DIcon className="w-8 h-8" />}
+                        {resourceType === "pages" && <DocumentTextIcon className="w-8 h-8" />}
+                        {resourceType === "files" && <PhotoIcon className="w-8 h-8" />}
+                      </div>
+                    )}
+                    <div className="editor-resource-item__info">
+                      <span className="editor-resource-item__title">{item.title}</span>
+                      {item.price && (
+                        <span className="editor-resource-item__price">{item.price}</span>
+                      )}
+                      {item.meta && (
+                        <span className="editor-resource-item__meta">{item.meta}</span>
+                      )}
+                    </div>
+                    {selectedId === item.id && (
+                      <div className="editor-resource-item__check">
+                        <CheckIcon className="w-4 h-4" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {hasMore && (
+                <div className="editor-resource-load-more">
+                  <button
+                    className="editor-btn editor-btn--secondary"
+                    onClick={handleLoadMore}
+                    disabled={loading}
+                  >
+                    {loading ? "Loading..." : "Load More"}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+// ============================================
 // THEME SETTINGS PANEL
 // ============================================
 
@@ -845,12 +1057,25 @@ const SettingsInspector = () => {
     );
   }
 
-  const displayName = data.type
+  // Get section info
+  const sectionInfo = store.getSection(path.sectionId);
+  const section = sectionInfo.section;
+
+  const sectionName = section?.label || section?.type
     ?.replace(/-/g, " ")
     .replace(/_/g, " ")
     .split(" ")
     .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ") || (type === "block" ? "Block" : "Section");
+    .join(" ") || "Section";
+
+  const displayName = type === "block"
+    ? (data as any).type
+        ?.replace(/-/g, " ")
+        .replace(/_/g, " ")
+        .split(" ")
+        .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ") || "Block"
+    : sectionName;
 
   const handleSettingChange = (key: string, value: any) => {
     if (type === "block" && path.blockId) {
@@ -870,14 +1095,51 @@ const SettingsInspector = () => {
     }
   };
 
+  const handleDuplicate = () => {
+    if (type === "section") {
+      store.duplicateSection(path.groupType, path.sectionId);
+    }
+  };
+
+  const handleBackToSection = () => {
+    store.selectSection(path.groupType, path.sectionId);
+  };
+
   return (
     <div className="editor-sidebar-secondary__container">
+      {/* Breadcrumb Navigation */}
+      {type === "block" && (
+        <nav className="editor-breadcrumb">
+          <button
+            className="editor-breadcrumb__item editor-breadcrumb__item--link"
+            onClick={handleBackToSection}
+          >
+            {sectionName}
+          </button>
+          <ChevronDownIcon className="editor-breadcrumb__separator" style={{ transform: "rotate(-90deg)" }} />
+          <span className="editor-breadcrumb__item editor-breadcrumb__item--current">
+            {displayName}
+          </span>
+        </nav>
+      )}
+
       {/* Header */}
       <header className="editor-sidebar-secondary__header">
         <h2 className="editor-sidebar-secondary__title">{displayName}</h2>
-        <button className="editor-navitem__action-btn">
-          <Bars2Icon className="w-4 h-4" />
-        </button>
+        <div className="editor-header-actions">
+          {type === "section" && (
+            <button
+              className="editor-navitem__action-btn"
+              onClick={handleDuplicate}
+              title="Duplicate section"
+            >
+              <DocumentDuplicateIcon className="w-4 h-4" />
+            </button>
+          )}
+          <button className="editor-navitem__action-btn" title="More options">
+            <Bars2Icon className="w-4 h-4" />
+          </button>
+        </div>
       </header>
 
       {/* Settings Content */}
@@ -919,6 +1181,8 @@ interface SettingFieldProps {
 
 const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showResourcePicker, setShowResourcePicker] = useState(false);
+  const [resourcePickerType, setResourcePickerType] = useState<"products" | "collections" | "pages" | "files">("files");
 
   const label = settingKey
     .replace(/_/g, " ")
@@ -927,11 +1191,241 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 
-  // Detect color fields by key name or value format
+  // Detect field types by key name
   const isColorField =
     settingKey.toLowerCase().includes("color") ||
     settingKey.toLowerCase().includes("background") ||
     (typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value));
+
+  const isImageField =
+    settingKey.toLowerCase().includes("image") ||
+    settingKey.toLowerCase().includes("logo") ||
+    settingKey.toLowerCase().includes("cover") ||
+    settingKey.toLowerCase().includes("banner") ||
+    settingKey.toLowerCase().includes("photo");
+
+  const isProductField =
+    settingKey.toLowerCase().includes("product") &&
+    !settingKey.toLowerCase().includes("products");
+
+  const isCollectionField =
+    settingKey.toLowerCase().includes("collection") &&
+    !settingKey.toLowerCase().includes("collections");
+
+  const isProductsField = settingKey.toLowerCase().includes("products");
+  const isCollectionsField = settingKey.toLowerCase().includes("collections");
+
+  // Product Picker
+  if (isProductField) {
+    const productData = typeof value === "object" && value ? value : null;
+
+    return (
+      <div className="editor-setting">
+        <label className="editor-setting__label">{label}</label>
+        <div className="editor-resource-picker">
+          <button
+            className="editor-resource-picker__trigger"
+            onClick={() => {
+              setResourcePickerType("products");
+              setShowResourcePicker(true);
+            }}
+          >
+            {productData?.image ? (
+              <img
+                src={productData.image}
+                alt={productData.title}
+                className="editor-resource-picker__preview"
+              />
+            ) : (
+              <div className="editor-resource-picker__placeholder">
+                <ShoppingBagIcon className="editor-resource-picker__placeholder-icon" />
+              </div>
+            )}
+            <div className="editor-resource-picker__info">
+              {productData?.title ? (
+                <>
+                  <span className="editor-resource-picker__title">{productData.title}</span>
+                  {productData.price && (
+                    <span className="editor-resource-picker__meta">{productData.price}</span>
+                  )}
+                </>
+              ) : (
+                <span className="editor-resource-picker__empty">Select a product</span>
+              )}
+            </div>
+            {productData && (
+              <button
+                className="editor-resource-picker__remove"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange(null);
+                }}
+              >
+                <TrashIcon className="w-4 h-4" />
+              </button>
+            )}
+          </button>
+        </div>
+        <ResourcePickerModal
+          isOpen={showResourcePicker && resourcePickerType === "products"}
+          onClose={() => setShowResourcePicker(false)}
+          onSelect={(resource) => {
+            onChange({
+              id: resource.id,
+              title: resource.title,
+              handle: resource.handle,
+              price: resource.price,
+              image: resource.image,
+            });
+          }}
+          resourceType="products"
+          selectedId={productData?.id}
+        />
+      </div>
+    );
+  }
+
+  // Collection Picker
+  if (isCollectionField) {
+    const collectionData = typeof value === "object" && value ? value : null;
+
+    return (
+      <div className="editor-setting">
+        <label className="editor-setting__label">{label}</label>
+        <div className="editor-resource-picker">
+          <button
+            className="editor-resource-picker__trigger"
+            onClick={() => {
+              setResourcePickerType("collections");
+              setShowResourcePicker(true);
+            }}
+          >
+            {collectionData?.image ? (
+              <img
+                src={collectionData.image}
+                alt={collectionData.title}
+                className="editor-resource-picker__preview"
+              />
+            ) : (
+              <div className="editor-resource-picker__placeholder">
+                <Square3Stack3DIcon className="editor-resource-picker__placeholder-icon" />
+              </div>
+            )}
+            <div className="editor-resource-picker__info">
+              {collectionData?.title ? (
+                <>
+                  <span className="editor-resource-picker__title">{collectionData.title}</span>
+                  {collectionData.meta && (
+                    <span className="editor-resource-picker__meta">{collectionData.meta}</span>
+                  )}
+                </>
+              ) : (
+                <span className="editor-resource-picker__empty">Select a collection</span>
+              )}
+            </div>
+            {collectionData && (
+              <button
+                className="editor-resource-picker__remove"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange(null);
+                }}
+              >
+                <TrashIcon className="w-4 h-4" />
+              </button>
+            )}
+          </button>
+        </div>
+        <ResourcePickerModal
+          isOpen={showResourcePicker && resourcePickerType === "collections"}
+          onClose={() => setShowResourcePicker(false)}
+          onSelect={(resource) => {
+            onChange({
+              id: resource.id,
+              title: resource.title,
+              handle: resource.handle,
+              meta: resource.meta,
+              image: resource.image,
+            });
+          }}
+          resourceType="collections"
+          selectedId={collectionData?.id}
+        />
+      </div>
+    );
+  }
+
+  // Image picker with modal
+  if (isImageField) {
+    const hasImage = typeof value === "string" && value.length > 0;
+    const filename = hasImage ? value.split("/").pop() : null;
+
+    return (
+      <div className="editor-setting">
+        <label className="editor-setting__label">{label}</label>
+        <div className="editor-image-picker">
+          <button
+            className={clsx(
+              "editor-image-picker__trigger",
+              hasImage && "editor-image-picker__trigger--has-image"
+            )}
+            onClick={() => {
+              setResourcePickerType("files");
+              setShowResourcePicker(true);
+            }}
+          >
+            {hasImage ? (
+              <img
+                src={value}
+                alt={label}
+                className="editor-image-picker__preview"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
+            ) : (
+              <div className="editor-image-picker__placeholder">
+                <PhotoIcon className="editor-image-picker__placeholder-icon" />
+              </div>
+            )}
+            <div className="editor-image-picker__info">
+              {hasImage ? (
+                <span className="editor-image-picker__filename">{filename}</span>
+              ) : (
+                <>
+                  <span className="editor-image-picker__label">Select image</span>
+                  <span className="editor-image-picker__hint">from Shopify files</span>
+                </>
+              )}
+            </div>
+            {hasImage && (
+              <div className="editor-image-picker__actions">
+                <button
+                  className="editor-image-picker__btn editor-image-picker__btn--remove"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChange("");
+                  }}
+                  title="Remove image"
+                >
+                  <TrashIcon className="editor-image-picker__btn-icon" />
+                </button>
+              </div>
+            )}
+          </button>
+        </div>
+        <ResourcePickerModal
+          isOpen={showResourcePicker && resourcePickerType === "files"}
+          onClose={() => setShowResourcePicker(false)}
+          onSelect={(resource) => {
+            onChange(resource.url || resource.image || "");
+          }}
+          resourceType="files"
+          title="Image"
+        />
+      </div>
+    );
+  }
 
   // Color picker
   if (isColorField && typeof value === "string") {
@@ -1001,6 +1495,7 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
     );
   }
 
+  // Boolean
   if (typeof value === "boolean") {
     return (
       <div className="editor-setting">
@@ -1017,6 +1512,7 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
     );
   }
 
+  // Number
   if (typeof value === "number") {
     return (
       <div className="editor-setting">
@@ -1031,7 +1527,7 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
     );
   }
 
-  // Check for select-like fields (arrays)
+  // Array (select)
   if (Array.isArray(value)) {
     return (
       <div className="editor-setting">
@@ -1047,81 +1543,6 @@ const SettingField = ({ settingKey, value, onChange }: SettingFieldProps) => {
             </option>
           ))}
         </select>
-      </div>
-    );
-  }
-
-  // Detect image fields by key name
-  const isImageField =
-    settingKey.toLowerCase().includes("image") ||
-    settingKey.toLowerCase().includes("logo") ||
-    settingKey.toLowerCase().includes("cover") ||
-    settingKey.toLowerCase().includes("banner") ||
-    settingKey.toLowerCase().includes("photo");
-
-  // Image picker
-  if (isImageField) {
-    const hasImage = typeof value === "string" && value.length > 0;
-    const filename = hasImage ? value.split("/").pop() : null;
-
-    return (
-      <div className="editor-setting">
-        <label className="editor-setting__label">{label}</label>
-        <div className="editor-image-picker">
-          <button
-            className={clsx(
-              "editor-image-picker__trigger",
-              hasImage && "editor-image-picker__trigger--has-image"
-            )}
-            onClick={() => {
-              // In a full implementation, this would open the Shopify Files picker
-              // For now, we'll use a simple prompt
-              const url = prompt("Enter image URL:", value || "");
-              if (url !== null) {
-                onChange(url);
-              }
-            }}
-          >
-            {hasImage ? (
-              <img
-                src={value}
-                alt={label}
-                className="editor-image-picker__preview"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                }}
-              />
-            ) : (
-              <div className="editor-image-picker__placeholder">
-                <PhotoIcon className="editor-image-picker__placeholder-icon" />
-              </div>
-            )}
-            <div className="editor-image-picker__info">
-              {hasImage ? (
-                <span className="editor-image-picker__filename">{filename}</span>
-              ) : (
-                <>
-                  <span className="editor-image-picker__label">Select image</span>
-                  <span className="editor-image-picker__hint">or drop an image to upload</span>
-                </>
-              )}
-            </div>
-            {hasImage && (
-              <div className="editor-image-picker__actions">
-                <button
-                  className="editor-image-picker__btn editor-image-picker__btn--remove"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onChange("");
-                  }}
-                  title="Remove image"
-                >
-                  <TrashIcon className="editor-image-picker__btn-icon" />
-                </button>
-              </div>
-            )}
-          </button>
-        </div>
       </div>
     );
   }
