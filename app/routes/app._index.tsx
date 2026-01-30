@@ -36,11 +36,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       error
     });
   } catch (err) {
+    // Crucial: Re-throw Response objects (redirects)
+    if (err instanceof Response) {
+      throw err;
+    }
     console.error("Loader Error:", err);
     return json({
        themes: [],
        shop: "",
-       error: "Authentication failed."
+       error: "Authentication failed or server error."
     });
   }
 };
