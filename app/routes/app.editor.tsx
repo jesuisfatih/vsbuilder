@@ -1684,6 +1684,36 @@ interface EditorCoreProps {
 }
 
 export function EditorCore({ loaderData, isProxyMode = false }: EditorCoreProps) {
+  // Debug log to verify component is mounting
+  console.log('[EditorCore] Mounting with data:', {
+    hasInitialData: !!loaderData?.initialData,
+    shop: loaderData?.shop,
+    themeId: loaderData?.themeId,
+    error: loaderData?.error,
+    isProxyMode
+  });
+
+  // Early return if error or missing critical data
+  if (loaderData?.error && !loaderData?.themeId) {
+    return (
+      <div style={{
+        padding: '40px',
+        textAlign: 'center',
+        fontFamily: 'system-ui, sans-serif',
+        color: '#fff',
+        background: '#1a1a2e',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <h1 style={{ color: '#dc2626', marginBottom: '16px' }}>Error</h1>
+        <p style={{ marginBottom: '24px', color: '#94a3b8' }}>{loaderData.error}</p>
+      </div>
+    );
+  }
+
   const { initialData, shop, themeId, themeName, themeRole, sourceThemeId, previewUrl, currentTemplate, availableTemplates, error, apiConfig } = loaderData;
   const navigate = useNavigate();
   const fetcher = useFetcher();
