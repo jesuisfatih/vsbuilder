@@ -2,14 +2,14 @@ import { PaintBrushIcon } from "@heroicons/react/24/outline";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import {
-    Badge,
-    Banner, BlockStack, Box, Button, Card, InlineStack, Layout,
-    Modal,
-    Page,
-    ResourceItem,
-    ResourceList,
-    Spinner,
-    Text
+  Badge,
+  Banner, BlockStack, Box, Button, Card, InlineStack, Layout,
+  Modal,
+  Page,
+  ResourceItem,
+  ResourceList,
+  Spinner,
+  Text
 } from "@shopify/polaris";
 import { useCallback, useState } from "react";
 import { authenticate } from "../shopify.server";
@@ -64,8 +64,8 @@ export default function Index() {
         .replace('gid://shopify/OnlineStoreTheme/', '')
         .replace('gid://shopify/Theme/', '');
 
-      // Open editor directly on app server (full functionality)
-      const editorUrl = `https://vsbuilder.techifyboost.com/app/editor?themeId=${numericId}`;
+      // Open App Proxy editor on store domain
+      const editorUrl = `https://${shop}/apps/vsbuilder/editor?themeId=${numericId}`;
       window.open(editorUrl, '_blank');
       setIsNavigating(false);
       toggleModal();

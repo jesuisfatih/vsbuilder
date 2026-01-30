@@ -1,8 +1,21 @@
 vsbuilder.techifyboost.com {
-    # Reverse proxy to the app container
-    reverse_proxy app:3000 {
-        # Disable passive health checks (we trust Docker's health check)
-        lb_try_duration 0
+    # Serve static assets directly from disk with CORS
+    handle_path /assets/* {
+        root * /app/build/client/assets
+        file_server
+        header {
+            Access-Control-Allow-Origin "*"
+            Access-Control-Allow-Methods "GET, OPTIONS"
+        }
+    }
+
+    # Reverse proxy to the app container for everything else
+    handle {
+        # Reverse proxy to the app container
+        reverse_proxy app:3000 {
+            # Disable passive health checks (we trust Docker's health check)
+            lb_try_duration 0
+        }
     }
 
     # Override response headers for iframe compatibility
