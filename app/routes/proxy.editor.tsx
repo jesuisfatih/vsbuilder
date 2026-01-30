@@ -1,139 +1,144 @@
 /**
  * 🎨 App Proxy Editor Route
  * =========================
- * Mevcut app.editor.tsx'i App Proxy üzerinden serve eder.
- * Mağaza domain'inde (https://store.myshopify.com/apps/vsbuilder/editor) açılır.
+ * Mağaza domain'inde açılır, içinde uygulama sunucusundaki editörü iframe ile gösterir.
+ * URL: https://STORE.myshopify.com/apps/vsbuilder/editor?themeId=XXX
  */
 import { type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import { downloadThemeForEditor } from "../utils/theme.server";
-
-// app.editor.tsx'den component'i import et
-import EditorComponent from "./app.editor";
-
-// Available template types
-const TEMPLATE_TYPES = [
-  { value: "index", label: "Home page", path: "templates/index.json" },
-  { value: "product", label: "Product pages", path: "templates/product.json" },
-  { value: "collection", label: "Collection pages", path: "templates/collection.json" },
-  { value: "page", label: "Pages", path: "templates/page.json" },
-  { value: "blog", label: "Blog", path: "templates/blog.json" },
-  { value: "article", label: "Article", path: "templates/article.json" },
-  { value: "cart", label: "Cart", path: "templates/cart.json" },
-  { value: "search", label: "Search results", path: "templates/search.json" },
-  { value: "404", label: "404 page", path: "templates/404.json" },
-];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  console.log('[ProxyEditor] === Loader starting ===');
-
   try {
-    // App Proxy authentication - mağaza domain'inden gelen istekler için
-    const { admin, session } = await authenticate.public.appProxy(request);
+    // App Proxy authentication
+    const { session } = await authenticate.public.appProxy(request);
 
     if (!session) {
-      throw new Response("Unauthorized", { status: 401 });
+      return new Response("Unauthorized", { status: 401 });
     }
 
     const url = new URL(request.url);
-    const themeIdParam = url.searchParams.get("themeId");
-    const templateParam = url.searchParams.get("template") || "index";
+    const themeId = url.searchParams.get("themeId") || "";
+    const template = url.searchParams.get("template") || "index";
 
-    console.log('[ProxyEditor] Theme ID:', themeIdParam);
-    console.log('[ProxyEditor] Template:', templateParam);
-    console.log('[ProxyEditor] Shop:', session.shop);
+    // Build editor URL on application server
+    const editorUrl = `https://vsbuilder.techifyboost.com/app/editor?themeId=${themeId}&template=${template}`;
 
-    // Error response helper
-    const errorResponse = (error: string) => ({
-      shop: session.shop,
-      themeId: null,
-      themeName: null,
-      themeRole: null,
-      sourceThemeId: null,
-      currentTemplate: templateParam,
-      availableTemplates: TEMPLATE_TYPES,
-      initialData: {
-        template: { sections: {}, order: [] as string[] },
-        header: { sections: {}, order: [] as string[] },
-        footer: { sections: {}, order: [] as string[] },
-      },
-      previewUrl: "/",
-      error,
+    // Return full-page iframe wrapper
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VSBuilder Editor</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    .editor-frame {
+      width: 100%;
+      height: 100vh;
+      border: none;
+    }
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #f6f6f7;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      transition: opacity 0.3s ease;
+    }
+    .loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loading-spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #e3e3e3;
+      border-top-color: #5c6ac4;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    .loading-text {
+      margin-top: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      color: #637381;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="loading-overlay" id="loading">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Loading VSBuilder Editor...</div>
+  </div>
+
+  <iframe
+    id="editor-frame"
+    class="editor-frame"
+    src="${editorUrl}"
+    allow="clipboard-read; clipboard-write"
+  ></iframe>
+
+  <script>
+    const iframe = document.getElementById('editor-frame');
+    const loading = document.getElementById('loading');
+
+    iframe.addEventListener('load', function() {
+      setTimeout(function() {
+        loading.classList.add('hidden');
+      }, 500);
     });
 
-    if (!admin) {
-      console.error('[ProxyEditor] No admin context');
-      return errorResponse("Admin context not available.");
-    }
+    // Fallback: hide loading after 10 seconds anyway
+    setTimeout(function() {
+      loading.classList.add('hidden');
+    }, 10000);
+  </script>
+</body>
+</html>
+    `;
 
-    if (!themeIdParam) {
-      console.error('[ProxyEditor] No theme ID provided');
-      return errorResponse("No theme selected. Please go back and select a theme.");
-    }
-
-    // Download theme data
-    console.log('[ProxyEditor] Calling downloadThemeForEditor...');
-    const themeData = await downloadThemeForEditor(admin, themeIdParam, templateParam);
-
-    if (!themeData) {
-      console.error('[ProxyEditor] downloadThemeForEditor returned null');
-      return errorResponse("Failed to download theme data. Please try again.");
-    }
-
-    console.log('[ProxyEditor] Theme downloaded successfully');
-    console.log('[ProxyEditor] Theme name:', themeData.theme.name);
-
-    // Build preview URL - kendi render motorumuzu kullan
-    const previewUrl = `/api/render-local?themeId=${themeData.theme.numericId}&template=${templateParam}`;
-
-    return {
-      shop: session.shop,
-      themeId: themeData.theme.numericId,
-      themeName: themeData.theme.name,
-      themeRole: themeData.theme.role,
-      sourceThemeId: themeData.theme.numericId,
-      currentTemplate: templateParam,
-      availableTemplates: TEMPLATE_TYPES,
-      initialData: {
-        template: {
-          sections: themeData.template.sections,
-          order: themeData.template.order,
-        },
-        header: {
-          sections: themeData.header.sections,
-          order: themeData.header.order,
-        },
-        footer: {
-          sections: themeData.footer.sections,
-          order: themeData.footer.order,
-        },
+    return new Response(html, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "X-Frame-Options": "SAMEORIGIN",
       },
-      previewUrl,
-      error: null,
-    };
+    });
   } catch (error) {
-    console.error("[ProxyEditor] Loader error:", error);
-    if (error instanceof Response) {
-      throw error;
-    }
-    return {
-      shop: "demo-shop",
-      themeId: null,
-      themeName: null,
-      themeRole: null,
-      sourceThemeId: null,
-      currentTemplate: "index",
-      availableTemplates: TEMPLATE_TYPES,
-      initialData: {
-        template: { sections: {}, order: [] as string[] },
-        header: { sections: {}, order: [] as string[] },
-        footer: { sections: {}, order: [] as string[] },
-      },
-      previewUrl: "/",
-      error: "Failed to load editor. Please try again.",
-    };
+    console.error("[ProxyEditor] Error:", error);
+    return new Response(`
+      <!DOCTYPE html>
+      <html>
+      <head><title>Error</title></head>
+      <body style="font-family: system-ui; padding: 40px; text-align: center;">
+        <h1>Error Loading Editor</h1>
+        <p>Please try again or contact support.</p>
+        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 20px; cursor: pointer;">
+          Retry
+        </button>
+      </body>
+      </html>
+    `, {
+      status: 500,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
   }
 };
-
-// Mevcut app.editor.tsx component'ini kullan
-export default EditorComponent;
