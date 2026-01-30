@@ -37,14 +37,12 @@ export default function App() {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <Meta />
-        {/* Do not load Remix links on Proxy Editor, Extension handles it */}
-        {!isProxyEditor && <Links />}
+        <Links />
       </head>
       <body>
         <Outlet />
         <ScrollRestoration />
-        {/* Do not load Remix scripts on Proxy Editor, Extension handles it */}
-        {!isProxyEditor && <Scripts />}
+        <Scripts />
       </body>
     </html>
   );
