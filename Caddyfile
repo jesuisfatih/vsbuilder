@@ -5,12 +5,18 @@ vsbuilder.techifyboost.com {
         lb_try_duration 0
     }
 
-    # Security headers for Shopify iframe compatibility
+    # Override response headers for iframe compatibility
     header {
-        Content-Security-Policy "frame-ancestors https://*.myshopify.com https://admin.shopify.com;"
+        # Remove CSP from backend response and set our own
+        -Content-Security-Policy
+        Content-Security-Policy "frame-ancestors https://*.myshopify.com https://admin.shopify.com https://*.techifyboost.com 'self';"
+
+        # Remove X-Frame-Options to allow framing
+        -X-Frame-Options
+
+        # Security headers
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
-        -X-Frame-Options
     }
 }
 
