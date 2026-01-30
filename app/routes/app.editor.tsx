@@ -1675,7 +1675,8 @@ export default function Editor() {
   const getApiPaths = () => {
     const pathname = window.location.pathname;
     const isProxyMode = pathname.startsWith('/proxy/');
-    console.log('[getApiPaths] pathname:', pathname, 'isProxyMode:', isProxyMode);
+    // DEBUG: Using alert to guarantee visibility
+    alert(`[DEBUG] pathname: ${pathname}, isProxyMode: ${isProxyMode}`);
 
     if (isProxyMode) {
       return {
