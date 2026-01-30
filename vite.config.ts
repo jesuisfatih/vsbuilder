@@ -54,6 +54,7 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     remix({
+      ssr: false, // SPA mode - no SSR, no __manifest fetch, no hydration issues
       ignoredRouteFiles: ["**/.*"],
       future: {
         v3_fetcherPersist: true,
