@@ -22,6 +22,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  ArrowLeftIcon,
+  ArrowPathIcon,
+  ArrowRightIcon,
   ArrowTopRightOnSquareIcon,
   ArrowUturnLeftIcon,
   ArrowUturnRightIcon,
@@ -31,9 +34,11 @@ import {
   Cog6ToothIcon,
   ComputerDesktopIcon,
   DevicePhoneMobileIcon,
+  DocumentDuplicateIcon,
   DocumentTextIcon,
   EyeIcon,
   EyeSlashIcon,
+  GlobeAltIcon,
   MagnifyingGlassIcon,
   PhotoIcon,
   PlusCircleIcon,
@@ -443,19 +448,29 @@ interface SectionGroupProps {
   label: string;
   sections: Record<string, Section>;
   order: string[];
+  searchFilter?: string;
 }
 
-const SectionGroup = ({ groupType, label, sections, order }: SectionGroupProps) => {
+const SectionGroup = ({ groupType, label, sections, order, searchFilter = "" }: SectionGroupProps) => {
   const store = useEditorStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Filter sections by search
+  const filteredOrder = order.filter((sectionId) => {
+    if (!searchFilter.trim()) return true;
+    const section = sections[sectionId];
+    if (!section) return false;
+    const sectionName = section.label || section.type || "";
+    return sectionName.toLowerCase().includes(searchFilter.toLowerCase());
+  });
 
   return (
     <>
       <div className="editor-section-group">
         <div className="editor-section-group__label">{label}</div>
-        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+        <SortableContext items={filteredOrder} strategy={verticalListSortingStrategy}>
           <ul className="editor-navlist">
-            {order.map((id) => {
+            {filteredOrder.map((id) => {
               const section = sections[id];
               if (!section) return null;
 
@@ -1612,6 +1627,9 @@ export default function Editor() {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
   const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
+  const [showSectionPicker, setShowSectionPicker] = useState(false);
+  const [sectionPickerGroup, setSectionPickerGroup] = useState<GroupType>("template");
+  const [sidebarSearch, setSidebarSearch] = useState("");
 
   // Get current template label
   const currentTemplateLabel = availableTemplates?.find((t: { value: string; label: string }) => t.value === currentTemplate)?.label || "Home page";
@@ -1620,6 +1638,24 @@ export default function Editor() {
   const handleTemplateChange = (templateValue: string) => {
     setShowTemplateDropdown(false);
     navigate(`/app/editor?template=${templateValue}`);
+  };
+
+  // Handle discard all changes
+  const handleDiscardChanges = () => {
+    if (confirm("Are you sure you want to discard all unsaved changes? This cannot be undone.")) {
+      store.initializeFromServer(
+        initialData.template,
+        initialData.header,
+        initialData.footer
+      );
+      store.markClean();
+    }
+  };
+
+  // Handle add section click
+  const handleAddSectionClick = (groupType: GroupType) => {
+    setSectionPickerGroup(groupType);
+    setShowSectionPicker(true);
   };
 
   // DnD Sensors
@@ -1718,9 +1754,30 @@ export default function Editor() {
     }
   }, [fetcher.state, fetcher.data]);
 
+  // Unsaved changes warning (beforeunload)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (store.isDirty) {
+        e.preventDefault();
+        e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
+        return e.returnValue;
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [store.isDirty]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in inputs
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {
+        return;
+      }
+
+      // Ctrl/Cmd + Z = Undo, Ctrl/Cmd + Shift + Z = Redo
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         if (e.shiftKey) {
@@ -1729,9 +1786,38 @@ export default function Editor() {
           store.undo();
         }
       }
+
+      // Ctrl/Cmd + S = Save
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         handleSave();
+      }
+
+      // Ctrl/Cmd + D = Duplicate selected section
+      if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+        e.preventDefault();
+        const path = store.selectedPath;
+        if (path && !path.blockId) {
+          store.duplicateSection(path.groupType, path.sectionId);
+        }
+      }
+
+      // Delete/Backspace = Delete selected
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const path = store.selectedPath;
+        if (path) {
+          e.preventDefault();
+          if (path.blockId) {
+            store.deleteBlock(path.sectionId, path.blockId);
+          } else {
+            store.deleteSection(path.groupType, path.sectionId);
+          }
+        }
+      }
+
+      // Escape = Clear selection
+      if (e.key === "Escape") {
+        store.clearSelection();
       }
     };
 
@@ -1968,24 +2054,41 @@ export default function Editor() {
               </div>
             </header>
 
+            {/* Sidebar Search */}
+            <div className="editor-sidebar-search">
+              <div className="editor-sidebar-search__input-wrapper">
+                <MagnifyingGlassIcon className="editor-sidebar-search__icon" />
+                <input
+                  type="text"
+                  className="editor-sidebar-search__input"
+                  placeholder="Search sections..."
+                  value={sidebarSearch}
+                  onChange={(e) => setSidebarSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
             <div className="editor-sidebar__content editor-scrollbar">
               <SectionGroup
                 groupType="header"
                 label="Header"
                 sections={store.headerGroup.sections}
                 order={store.headerGroup.order}
+                searchFilter={sidebarSearch}
               />
               <SectionGroup
                 groupType="template"
                 label="Template"
                 sections={store.template.sections}
                 order={store.template.order}
+                searchFilter={sidebarSearch}
               />
               <SectionGroup
                 groupType="footer"
                 label="Footer"
                 sections={store.footerGroup.sections}
                 order={store.footerGroup.order}
+                searchFilter={sidebarSearch}
               />
             </div>
           </aside>
@@ -1993,6 +2096,51 @@ export default function Editor() {
           {/* MAIN PREVIEW */}
           <main className="editor-main">
             <div className="editor-preview">
+              {/* Browser Controls */}
+              <div className="editor-browser-controls">
+                <div className="editor-browser-controls__nav">
+                  <button
+                    className="editor-browser-controls__btn"
+                    onClick={() => iframeRef.current?.contentWindow?.history.back()}
+                    title="Go back"
+                  >
+                    <ArrowLeftIcon className="w-4 h-4" />
+                  </button>
+                  <button
+                    className="editor-browser-controls__btn"
+                    onClick={() => iframeRef.current?.contentWindow?.history.forward()}
+                    title="Go forward"
+                  >
+                    <ArrowRightIcon className="w-4 h-4" />
+                  </button>
+                  <button
+                    className="editor-browser-controls__btn"
+                    onClick={() => iframeRef.current?.contentWindow?.location.reload()}
+                    title="Refresh preview"
+                  >
+                    <ArrowPathIcon className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="editor-browser-controls__url">
+                  <GlobeAltIcon className="w-4 h-4" />
+                  <span className="editor-browser-controls__url-text">
+                    {store.previewUrl?.replace(/^https?:\/\//, '').split('?')[0] || 'Loading...'}
+                  </span>
+                </div>
+                <div className="editor-browser-controls__actions">
+                  <a
+                    href={store.previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="editor-browser-controls__btn"
+                    title="Open in new tab"
+                  >
+                    <ArrowTopRightOnSquareIcon className="w-4 h-4" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Preview Frame */}
               <motion.div
                 layout
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
