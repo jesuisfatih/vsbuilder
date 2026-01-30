@@ -1621,6 +1621,8 @@ export default function Editor() {
   const { initialData, shop, themeId, previewUrl, currentTemplate, availableTemplates } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const fetcher = useFetcher();
+  const renderFetcher = useFetcher(); // Dedicated fetcher for rendering
+  const previewFetcher = useFetcher(); // Dedicated fetcher for full page preview
   const store = useEditorStore();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -1630,6 +1632,7 @@ export default function Editor() {
   const [showSectionPicker, setShowSectionPicker] = useState(false);
   const [sectionPickerGroup, setSectionPickerGroup] = useState<GroupType>("template");
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [renderMode, setRenderMode] = useState<"live" | "static">("live");
 
   // Get current template label
   const currentTemplateLabel = availableTemplates?.find((t: { value: string; label: string }) => t.value === currentTemplate)?.label || "Home page";
@@ -1637,6 +1640,7 @@ export default function Editor() {
   // Handle template change
   const handleTemplateChange = (templateValue: string) => {
     setShowTemplateDropdown(false);
+    setIframeReady(false); // Reset ready state
     navigate(`/app/editor?template=${templateValue}`);
   };
 
@@ -1649,6 +1653,9 @@ export default function Editor() {
         initialData.footer
       );
       store.markClean();
+      // Reload preview
+      setIframeReady(false);
+      store.setPreviewUrl(previewUrl);
     }
   };
 
@@ -1671,8 +1678,104 @@ export default function Editor() {
       initialData.header,
       initialData.footer
     );
-    store.setPreviewUrl(previewUrl);
-  }, []);
+    // Initial fetch of preview
+    // Construct path based on current template roughly
+    let path = "/";
+    if (currentTemplate === "product") path = "/products/first"; // Ideally dynamic
+    else if (currentTemplate === "collection") path = "/collections/all";
+    else if (currentTemplate === "cart") path = "/cart";
+    else if (currentTemplate === "search") path = "/search";
+
+    // We fetch via our API proxy to avoid X-Frame-Options
+    const fetchUrl = `/api/preview?themeId=${themeId}&template=${currentTemplate}&path=${encodeURIComponent(path)}`;
+
+    // Use store.previewUrl just for display purposes in browser bar
+    store.setPreviewUrl(`https://${shop}${path}?preview_theme_id=${themeId}`);
+
+    previewFetcher.load(fetchUrl);
+  }, [themeId, currentTemplate]); // Refetch when template changes
+
+  // Inject Preview HTML
+  useEffect(() => {
+    if (previewFetcher.data && !iframeReady && iframeRef.current) {
+        const content = typeof previewFetcher.data === 'string' ? previewFetcher.data : (previewFetcher.data as any).html || "";
+
+        if (!content) return;
+
+        const doc = iframeRef.current.contentDocument;
+        if (doc) {
+            doc.open();
+            doc.write(content);
+            doc.close();
+            setIframeReady(true);
+        }
+    }
+  }, [previewFetcher.data, iframeReady]);
+
+  // Section Rendering Logic
+  useEffect(() => {
+    // Determine what to render based on selection
+    if (!store.selectedPath || !store.selectedPath.sectionId) return;
+
+    // Debounce the render request
+    const timer = setTimeout(() => {
+      const { sectionId, groupType } = store.selectedPath!;
+      const section = store.getSection(sectionId).section;
+      if (!section) return;
+
+      // Construct render params
+      const params = new URLSearchParams();
+      params.append("themeId", themeId || "");
+      params.append("sectionId", section.type); // Normally section ID but here type acts as lookup if static? No, type is filename usually.
+
+      // Wait, we need actual section ID (e.g. 'template--123__main') if we want to render THAT specific instance
+      // OR we render by type and pass settings.
+      // Shopify Section Rendering API requires 'section_id' which corresponds to the file name without .liquid extension.
+      // e.g. 'image-banner'
+
+      params.append("sectionId", section.type);
+
+      // Add settings as params
+      Object.entries(section.settings).forEach(([key, value]) => {
+         if (typeof value === 'object') {
+             // Arrays/Objects need special handling, usually flattened or JSON stringified?
+             // Shopify expects flat params for settings usually?
+             // Actually, for section rendering API, we pass settings as query params if using ?section_id=...
+             // But complex settings are hard.
+             // Let's just try.
+             params.append(`section[settings][${key}]`, String(value));
+         } else {
+             params.append(`section[settings][${key}]`, String(value));
+         }
+      });
+
+      // Add blocks? Advanced topic.
+
+      renderFetcher.load(`/api/render?${params.toString()}`);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [store.template, store.headerGroup, store.footerGroup, store.selectedPath]);
+
+  // Inject rendered HTML into iframe
+  useEffect(() => {
+    if (renderFetcher.data && (renderFetcher.data as any).error) {
+       console.error("Render error:", (renderFetcher.data as any).error);
+       return;
+    }
+
+    // Since renderFetcher.load returns raw HTML via our proxy if successful?
+    // Wait, our proxy returns text/html response.
+    // Remix fetcher handles JSON usually, but it can handle text?
+
+    // Actually, useFetcher().load expects a loader response.
+    // If loader returns a Response object, fetcher.data handles serialized data.
+    // If loader returns Response(html), useFetcher might try to parse JSON and fail.
+    // Remix fetcher.load automatically handles logic.
+
+    // Let's modify api.render.tsx to return JSON with { html: "..." } to be safe with useFetcher.
+
+  }, [renderFetcher.data]);
 
   // Listen for iframe ready message
   useEffect(() => {
@@ -2151,13 +2254,10 @@ export default function Editor() {
               >
                 <iframe
                   ref={iframeRef}
-                  src={store.previewUrl}
                   className="editor-preview__iframe"
                   title="Store preview"
-                  onLoad={() => {
-                    // Fallback if iframe doesn't send ready message
-                    setTimeout(() => setIframeReady(true), 1000);
-                  }}
+                  // Remove src to prevent double loading or auth issues
+                  // src={store.previewUrl}
                 />
               </motion.div>
             </div>
