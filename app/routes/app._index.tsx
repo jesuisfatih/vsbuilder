@@ -8,7 +8,6 @@ import {
   Page,
   ResourceItem,
   ResourceList,
-  Select,
   Spinner,
   Text
 } from "@shopify/polaris";
@@ -215,31 +214,15 @@ export default function Index() {
                <BlockStack gap="200">
                   <Text as="h2" variant="headingLg" alignment="center">Visual Page Editor</Text>
                   <Text as="p" variant="bodyMd" tone="subdued" alignment="center">
-                    Select a theme to customize with the visual editor.
+                    Open the visual editor to customize your theme sections, add widgets, and preview changes in real-time.
                   </Text>
                </BlockStack>
-
-               <Select
-                  label="Select Theme"
-                  options={themes.map(t => ({
-                    label: t.name + (t.role === 'main' ? ' (Live)' : ''),
-                    value: t.id
-                  }))}
-                  onChange={(value) => {
-                    const theme = themes.find(t => t.id === value);
-                    setSelectedTheme(theme || null);
-                  }}
-                  value={selectedTheme?.id || ''}
-                  placeholder="Choose a theme..."
-               />
-
                <Button
                  variant="primary"
                  size="large"
                  fullWidth
-                 onClick={handleLaunchEditor}
-                 disabled={!selectedTheme || !!error}
-                 loading={isNavigating}
+                 onClick={toggleModal}
+                 disabled={!!error}
                >
                  🚀 Launch Editor
                </Button>
