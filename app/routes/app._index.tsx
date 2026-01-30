@@ -36,7 +36,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         const data = await response.json();
         themes = data.data?.themes?.nodes?.map((theme: any) => ({
           ...theme,
-          id: theme.id.replace('gid://shopify/Theme/', '')
+          // Handle both GID formats: gid://shopify/Theme/... and gid://shopify/OnlineStoreTheme/...
+          id: theme.id.replace('gid://shopify/OnlineStoreTheme/', '').replace('gid://shopify/Theme/', '')
         })) || [];
     } catch (e) {
         console.error("Theme API Error:", e);
