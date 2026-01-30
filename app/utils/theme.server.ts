@@ -7,7 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-const THEMES_DIR = process.env.THEMES_DIR || path.join(process.cwd(), "storage", "themes");
+const THEMES_DIR = process.env.THEMES_DIR || path.join(process.cwd(), "themes");
 
 // ============================================
 // TYPE DEFINITIONS
