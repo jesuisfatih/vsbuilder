@@ -169,11 +169,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           <div class="preview-area">
             <div class="preview-toolbar">
               <button onclick="window.location.reload()">↻ Refresh</button>
-              <div class="url-bar">https://${session.shop}/</div>
+              <div class="url-bar">https://${session.shop}/?preview_theme_id=${cleanThemeId}</div>
+              <button onclick="window.open('https://${session.shop}/?preview_theme_id=${cleanThemeId}', '_blank')">🔗 Open Preview</button>
               <button onclick="alert('Save functionality coming soon!')">💾 Save</button>
             </div>
-            <div class="preview-frame">
-              <iframe src="https://${session.shop}/?preview_theme_id=${cleanThemeId}" title="Preview"></iframe>
+            <div class="preview-frame" style="display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);">
+              <div style="text-align: center; max-width: 400px;">
+                <div style="font-size: 64px; margin-bottom: 16px;">🖼️</div>
+                <h2 style="color: #e94560; margin-bottom: 12px;">Live Preview</h2>
+                <p style="color: #888; line-height: 1.6; margin-bottom: 24px;">
+                  Due to browser security restrictions, the live preview opens in a new tab.
+                  Click the button below to see your changes in real-time.
+                </p>
+                <button
+                  onclick="window.open('https://${session.shop}/?preview_theme_id=${cleanThemeId}', '_blank')"
+                  style="background: #e94560; color: white; border: none; padding: 16px 32px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;"
+                >
+                  🚀 Open Live Preview
+                </button>
+                <p style="color: #555; font-size: 12px; margin-top: 16px;">
+                  Tip: Keep the preview tab open while editing. Refresh it to see changes.
+                </p>
+              </div>
             </div>
           </div>
         </div>
