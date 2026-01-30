@@ -64,10 +64,13 @@ export default function Index() {
         .replace('gid://shopify/OnlineStoreTheme/', '')
         .replace('gid://shopify/Theme/', '');
 
-      // Navigate to Admin editor with theme ID
-      navigate(`/app/editor?themeId=${numericId}`);
+      // Open App Proxy editor on store domain (bypasses admin iframe)
+      const editorUrl = `https://${shop}/apps/vsbuilder/editor?themeId=${numericId}`;
+      window.open(editorUrl, '_blank');
+      setIsNavigating(false);
+      toggleModal();
     }
-  }, [selectedTheme, navigate]);
+  }, [selectedTheme, shop, toggleModal]);
 
   const renderThemeItem = useCallback((item: ThemeInfo) => {
     const numericId = item.id
