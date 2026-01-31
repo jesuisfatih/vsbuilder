@@ -2,16 +2,6 @@
  * 🎨 App Proxy Editor Route
  * =========================
  * Mağaza domain'inde tam editor - App Proxy auth ile
- *
- * SSR'dan kaçınmak için ClientOnlyEditor wrapper kullanır.
- * Bu sayede hydration mismatch problemi ortadan kalkar.
- *
- * URL Flow:
- * https://dtfbank.com/apps/vsbuilder/editor
- *   ↓ (Shopify Proxy)
- * https://vsbuilder.techifyboost.com/proxy/editor
- *   ↓ (Bu route)
- * Minimal HTML (loading) + Client-side mount (full editor)
  */
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -36,12 +26,13 @@ const TEMPLATE_TYPES = [
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const appUrl = process.env.SHOPIFY_APP_URL || "https://vsbuilder.techifyboost.com";
 
-  // API endpoints configuration - ABSOLUTE URLs for proxy mode
+  // API endpoints configuration - RELATIVE URLs for proxy mode (avoid CORS)
+  // Request goes to Shopify -> Shopify proxies to Backend
   const apiConfig = {
-    syncCheck: `${appUrl}/proxy/api.sync`,
-    syncAction: `${appUrl}/proxy/api.sync`,
-    renderLocal: `${appUrl}/proxy/api.render-local`,
-    render: `${appUrl}/proxy/api.render`,
+    syncCheck: `/apps/vsbuilder/api.sync`,
+    syncAction: `/apps/vsbuilder/api.sync`,
+    renderLocal: `/apps/vsbuilder/api.render-local`,
+    render: `/apps/vsbuilder/api.render`,
   };
 
   try {
@@ -104,8 +95,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       throw new Error("Theme data unavailable");
     }
 
-    // Build preview URL - use absolute URL since we're in proxy context
-    const previewUrl = `${appUrl}/proxy/api.render-local?themeId=${themeData.theme.numericId}&template=${templateParam}`;
+    // Build preview URL - use relative URL since we're in proxy context
+    const previewUrl = `/apps/vsbuilder/api.render-local?themeId=${themeData.theme.numericId}&template=${templateParam}`;
 
     return json({
       appUrl,
@@ -159,7 +150,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 /**
  * Proxy Editor Component
- * ClientOnlyEditor ile sarmalanmış - hydration mismatch olmaz
  */
 export default function ProxyEditor() {
   const data = useLoaderData<typeof loader>();
@@ -211,7 +201,6 @@ export default function ProxyEditor() {
 
 /**
  * Headers for App Proxy
- * Shopify iframe içinde açılabilmesi için gerekli
  */
 export function headers() {
   return {
