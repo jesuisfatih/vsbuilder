@@ -2,8 +2,7 @@
  * Entry Client
  *
  * Proxy mode'da hydration yerine fresh render yapıyoruz.
- * Ve route ID uyuşmazlığını (Server: /proxy/editor vs Client: /apps/vsbuilder/editor)
- * context patching ile çözüyoruz.
+ * Ve route ID uyuşmazlığını context patching ile çözüyoruz.
  */
 
 import { RemixBrowser } from "@remix-run/react";
@@ -23,18 +22,14 @@ console.log('[entry.client] URL:', window.location.href);
 
 if (isProxyMode) {
   // PATCH: Route ID Mismatch Fix
-  // Server rendered "routes/proxy.editor" but Client Router expects "routes/apps.vsbuilder.editor"
-  // based on the URL pathname. We map the SSR data to the client route ID.
   const context = (window as any).__remixContext;
   if (context) {
     console.log('[entry.client] Patching Remix Context for Proxy Mode');
 
-    // Server ID is usually "routes/proxy.editor"
     const serverRouteId = "routes/proxy.editor";
     const clientRouteId = "routes/apps.vsbuilder.editor";
 
-    // Update matches to point to the client route ID
-    // Matches might be in context.state.matches or context.matches
+    // Update matches
     const matches = context.matches || context.state?.matches;
     if (matches) {
       matches.forEach((m: any) => {
@@ -45,16 +40,29 @@ if (isProxyMode) {
       });
     }
 
-    // Patch loaderData
-    // Might be in context.loaderData or context.state.loaderData
+    // Capture data directly from source
+    let foundData = null;
+
+    // Check root loaderData
     if (context.loaderData && context.loaderData[serverRouteId]) {
-      console.log(`[entry.client] Patching loaderData (root): ${serverRouteId} -> ${clientRouteId}`);
-      context.loaderData[clientRouteId] = context.loaderData[serverRouteId];
+      foundData = context.loaderData[serverRouteId];
+      context.loaderData[clientRouteId] = foundData;
+      console.log(`[entry.client] Patched root loaderData`);
     }
 
+    // Check state loaderData
     if (context.state?.loaderData && context.state.loaderData[serverRouteId]) {
-      console.log(`[entry.client] Patching loaderData (state): ${serverRouteId} -> ${clientRouteId}`);
-      context.state.loaderData[clientRouteId] = context.state.loaderData[serverRouteId];
+      foundData = context.state.loaderData[serverRouteId];
+      context.state.loaderData[clientRouteId] = foundData;
+      console.log(`[entry.client] Patched state loaderData`);
+    }
+
+    // Store globally for failsafe access
+    if (foundData) {
+      console.log('[entry.client] Saving data to global __VSBUILDER_DATA');
+      (window as any).__VSBUILDER_DATA = foundData;
+    } else {
+      console.warn('[entry.client] Could not find any data to patch!');
     }
   }
 
