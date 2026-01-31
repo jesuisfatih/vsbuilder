@@ -103,6 +103,9 @@ export class ShopifyLiquidEngine {
       cache: false, // Disable cache for development
       strictFilters: false,
       strictVariables: false,
+      lenientIf: true, // Be lenient with if/unless conditions
+      jsTruthy: true, // Use JavaScript truthiness
+      outputEscape: "escape", // Escape output by default
     });
 
     this.registerShopifyTags();
@@ -2441,7 +2444,8 @@ export class ShopifyLiquidEngine {
     };
 
     try {
-      return await this.engine.parseAndRender(sectionContent, sectionContext);
+      let html = await this.engine.parseAndRender(sectionContent, sectionContext);
+      return this.cleanupUnrenderedLiquid(html);
     } catch (error) {
       console.error(`Error rendering section ${sectionType}:`, error);
       return `<!-- Section Render Error: ${sectionType} -->`;
@@ -2489,11 +2493,35 @@ export class ShopifyLiquidEngine {
     };
 
     try {
-      return await this.engine.parseAndRender(layoutContent, fullContext);
+      let html = await this.engine.parseAndRender(layoutContent, fullContext);
+      // Clean up any unrendered Liquid variables that might cause URL errors
+      html = this.cleanupUnrenderedLiquid(html);
+      return html;
     } catch (error) {
       console.error(`Error rendering layout:`, error);
-      return contentForLayout;
+      return this.cleanupUnrenderedLiquid(contentForLayout);
     }
+  }
+
+  /**
+   * Clean up unrendered Liquid variables that might cause 404 errors
+   * These occur when section settings don't have values set
+   */
+  private cleanupUnrenderedLiquid(html: string): string {
+    // Remove src/href attributes that still contain Liquid syntax
+    // e.g., src="{{ fallback_image_url }}" -> src=""
+    html = html.replace(/(src|href|poster)=["']\s*\{\{[^}]+\}\}\s*["']/gi, '$1=""');
+
+    // Remove image tags with empty/invalid src
+    html = html.replace(/<img[^>]*src=["']\s*["'][^>]*>/gi, '');
+
+    // Remove video/source tags with empty/invalid src
+    html = html.replace(/<(source|video)[^>]*src=["']\s*["'][^>]*>/gi, '');
+
+    // Replace any remaining {{ ... }} in URLs with empty string
+    html = html.replace(/["']\s*\{\{[^}]+\}\}\s*["']/g, '""');
+
+    return html;
   }
 
   // ============================================
