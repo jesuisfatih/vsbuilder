@@ -7,7 +7,7 @@ import type { ClientLoaderFunctionArgs } from "@remix-run/react";
 
 // Client Loader
 export async function clientLoader({ request, params }: ClientLoaderFunctionArgs) {
-  console.log('[apps.vsbuilder.editor] clientLoader running');
+  console.log('[apps.vsbuilder.editor] clientLoader running - V2 (Check global data)');
 
   if (typeof window !== 'undefined') {
     // 1. Check global failsafe data first
