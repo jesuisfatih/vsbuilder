@@ -194,8 +194,29 @@ export class ShopifyLiquidEngine {
       },
       async render(scope: any) {
         const context = scope.getAll();
-        const contentForLayout = context.content_for_layout || "";
-        return contentForLayout;
+        const groupName = this.groupName;
+
+        // Handle special content placeholders
+        if (groupName === 'content_for_layout') {
+          return context.content_for_layout || "";
+        }
+
+        // Check for pre-rendered group content (header-group, footer-group, etc.)
+        const groupContentKey = `content_for_${groupName}`;
+        if (context[groupContentKey]) {
+          return context[groupContentKey];
+        }
+
+        // Try header and footer shortcuts
+        if (groupName === 'header-group' && context.content_for_header_group) {
+          return context.content_for_header_group;
+        }
+        if (groupName === 'footer-group' && context.content_for_footer_group) {
+          return context.content_for_footer_group;
+        }
+
+        // Fallback to content_for_layout for unrecognized groups
+        return context.content_for_layout || "";
       },
     });
 
@@ -305,6 +326,25 @@ export class ShopifyLiquidEngine {
           const snippetContent = fs.readFileSync(snippetPath, "utf-8");
           const parentContext = scope.getAll();
 
+          // ✅ CRITICAL: Global objects that snippets need access to
+          const globalObjects = {
+            shop: parentContext.shop,
+            settings: parentContext.settings,
+            routes: parentContext.routes,
+            request: parentContext.request,
+            localization: parentContext.localization,
+            cart: parentContext.cart,
+            customer: parentContext.customer,
+            linklists: parentContext.linklists,
+            collections: parentContext.collections,
+            all_products: parentContext.all_products,
+            blogs: parentContext.blogs,
+            pages: parentContext.pages,
+            template: parentContext.template,
+            page_title: parentContext.page_title,
+            canonical_url: parentContext.canonical_url,
+          };
+
           // Helper to resolve variable from context
           const resolveVar = (expr: string): any => {
             const parts = expr.split(".");
@@ -331,7 +371,10 @@ export class ShopifyLiquidEngine {
           if (this.withVar) {
             const value = resolveVar(this.withVar.expr);
             resolvedAssignments[this.withVar.alias] = value;
-            return await self.engine.parseAndRender(snippetContent, resolvedAssignments);
+            return await self.engine.parseAndRender(snippetContent, {
+              ...globalObjects,
+              ...resolvedAssignments,
+            });
           }
 
           // Handle "for" loop syntax
@@ -345,6 +388,7 @@ export class ShopifyLiquidEngine {
             let result = "";
             for (let i = 0; i < array.length; i++) {
               const itemContext = {
+                ...globalObjects,
                 ...resolvedAssignments,
                 [this.forLoop.itemVar]: array[i],
                 forloop: {
@@ -363,8 +407,11 @@ export class ShopifyLiquidEngine {
             return result;
           }
 
-          // Shopify render creates isolated scope - only explicit variables passed
-          return await self.engine.parseAndRender(snippetContent, resolvedAssignments);
+          // Normal render - include global objects
+          return await self.engine.parseAndRender(snippetContent, {
+            ...globalObjects,
+            ...resolvedAssignments,
+          });
         } catch (error) {
           console.error(`Error rendering snippet ${this.snippetName}:`, error);
           return `<!-- Snippet Error: ${this.snippetName} -->`;
@@ -916,6 +963,37 @@ export class ShopifyLiquidEngine {
 
     this.engine.registerFilter("asset_img_url", (asset: string, size?: string) => {
       return `/theme-assets/${asset}`;
+    });
+
+    // Stylesheet and script tag filters
+    this.engine.registerFilter("stylesheet_tag", (url: string) => {
+      if (!url) return "";
+      return `<link rel="stylesheet" href="${url}" type="text/css">`;
+    });
+
+    this.engine.registerFilter("script_tag", (url: string) => {
+      if (!url) return "";
+      return `<script src="${url}" type="text/javascript"></script>`;
+    });
+
+    this.engine.registerFilter("preload_tag", (url: string, asType?: string) => {
+      if (!url) return "";
+      const as = asType || (url.endsWith('.css') ? 'style' : url.endsWith('.js') ? 'script' : 'fetch');
+      return `<link rel="preload" href="${url}" as="${as}">`;
+    });
+
+    // Font filters
+    this.engine.registerFilter("font_url", (font: any, format?: string) => {
+      if (!font) return "";
+      if (typeof font === 'string') return font;
+      // Handle Shopify font objects
+      return font.url || font.src || `/theme-assets/fonts/${font.family || 'default'}.woff2`;
+    });
+
+    this.engine.registerFilter("font_face", (font: any, options?: any) => {
+      if (!font) return "";
+      const fontFamily = typeof font === 'string' ? font : (font.family || 'sans-serif');
+      return `@font-face { font-family: '${fontFamily}'; src: url('/theme-assets/fonts/${fontFamily}.woff2') format('woff2'); }`;
     });
 
     // String filters
@@ -2512,14 +2590,21 @@ export class ShopifyLiquidEngine {
     // e.g., src="{{ fallback_image_url }}" -> src=""
     html = html.replace(/(src|href|poster)=["']\s*\{\{[^}]+\}\}\s*["']/gi, '$1=""');
 
-    // Remove image tags with empty/invalid src
-    html = html.replace(/<img[^>]*src=["']\s*["'][^>]*>/gi, '');
+    // Replace any remaining {{ ... }} with placeholder text (not in attributes)
+    // This prevents broken URLs but keeps structure intact
+    html = html.replace(/\{\{\s*[^}]*\s*\}\}/g, (match) => {
+      // Keep translation keys visible for debugging
+      if (match.includes("'t:") || match.includes("| t")) {
+        return ""; // Empty for translation failures
+      }
+      return ""; // Empty string for other unrendered variables
+    });
 
-    // Remove video/source tags with empty/invalid src
-    html = html.replace(/<(source|video)[^>]*src=["']\s*["'][^>]*>/gi, '');
+    // Remove {% ... %} tags that weren't processed
+    html = html.replace(/\{%[^%]*%\}/g, "");
 
-    // Replace any remaining {{ ... }} in URLs with empty string
-    html = html.replace(/["']\s*\{\{[^}]+\}\}\s*["']/g, '""');
+    // NOTE: Don't remove empty src images - some themes use lazy loading
+    // html = html.replace(/<img[^>]*src=["']\s*["'][^>]*>/gi, '');
 
     return html;
   }
@@ -2750,6 +2835,9 @@ export class ShopifyLiquidEngine {
     return {};
   }
 
+  /**
+   * Get default values from schema settings
+   */
   private getDefaultSettings(schemaSettings: any[]): Record<string, any> {
     const defaults: Record<string, any> = {};
     for (const setting of schemaSettings) {
@@ -2777,6 +2865,7 @@ export class ShopifyLiquidEngine {
     });
     this.registerShopifyTags();
     this.registerShopifyFilters();
+    this.loadLocales();
   }
 }
 
