@@ -109,8 +109,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       </script>
     `;
 
-    // Inject base URL for assets - use proxy route
-    const baseUrl = `${url.origin}/proxy/assets?themeId=${themeId}&shopHandle=${shopHandle}&file=`;
+    // Inject base URL for assets - use relative proxy route
+    // This goes through Shopify proxy (/apps/vsbuilder/...) -> our backend (/proxy/...)
+    const baseUrl = `/apps/vsbuilder/assets?themeId=${themeId}&shopHandle=${shopHandle}&file=`;
 
     html = html.replace(/\/theme-assets\//g, baseUrl);
     html = html.replace(/\/theme-files\//g, baseUrl);
