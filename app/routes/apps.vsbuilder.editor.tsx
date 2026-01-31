@@ -210,3 +210,35 @@ export function headers() {
       "frame-ancestors https://*.myshopify.com https://admin.shopify.com",
   };
 }
+
+/**
+ * Client Loader - Prevents Remix from fetching loader data client-side
+ * This is critical because client-side fetch won't have Shopify signature
+ * and will get 403 from authenticate.public.appProxy
+ */
+import type { ClientLoaderFunctionArgs } from "@remix-run/react";
+
+export async function clientLoader({ serverLoader }: ClientLoaderFunctionArgs) {
+  console.log('[apps.vsbuilder.editor] clientLoader - using SSR data');
+
+  // Try to get data from Remix context (SSR data)
+  if (typeof window !== 'undefined') {
+    const context = (window as any).__remixContext;
+    const routeId = "routes/apps.vsbuilder.editor";
+
+    // Check various possible locations for loader data
+    const data = context?.state?.loaderData?.[routeId] ||
+                 context?.loaderData?.[routeId];
+
+    if (data) {
+      console.log('[apps.vsbuilder.editor] Found SSR data in context');
+      return data;
+    }
+  }
+
+  console.warn('[apps.vsbuilder.editor] No SSR data found');
+  return null;
+}
+
+// This tells Remix to run clientLoader during hydration
+clientLoader.hydrate = true;
