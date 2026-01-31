@@ -137,7 +137,7 @@ export class ShopifyLiquidEngine {
           if (file.endsWith(".json")) {
             const locale = file.replace(".default.json", "").replace(".json", "");
             const content = fs.readFileSync(path.join(localesDir, file), "utf-8");
-            this.locales[locale] = JSON.parse(content);
+            this.locales[locale] = JSON.parse(this.stripJsonComments(content));
           }
         }
       } catch (e) {
@@ -1728,6 +1728,12 @@ export class ShopifyLiquidEngine {
       return `<!-- Section not found: ${safeType} -->`;
     }
 
+    // Read section file content
+    const sectionContent = fs.readFileSync(sectionPath, "utf-8");
+
+    // Extract schema from section file
+    const schemaMatch = sectionContent.match(/{%[\s\S]*?schema[\s\S]*?%}([\s\S]*?){%[\s\S]*?endschema[\s\S]*?%}/);
+
     let sectionSchema: any = {};
     if (schemaMatch) {
       try {
@@ -1928,7 +1934,8 @@ export class ShopifyLiquidEngine {
     const settingsPath = path.join(this.themeDir, "config", "settings_data.json");
     if (fs.existsSync(settingsPath)) {
       try {
-        const data = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+        const content = fs.readFileSync(settingsPath, "utf-8");
+        const data = JSON.parse(this.stripJsonComments(content));
         return data.current || data.presets?.Default || {};
       } catch (e) {
         console.error("Failed to load theme settings:", e);
