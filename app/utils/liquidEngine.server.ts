@@ -1833,8 +1833,12 @@ export class ShopifyLiquidEngine {
 
     if (fs.existsSync(templateJsonPath)) {
       try {
-        templateJSON = JSON.parse(fs.readFileSync(templateJsonPath, "utf-8"));
+        let jsonContent = fs.readFileSync(templateJsonPath, "utf-8");
+        // Strip JavaScript-style comments from JSON (Shopify adds auto-generated comments)
+        jsonContent = this.stripJsonComments(jsonContent);
+        templateJSON = JSON.parse(jsonContent);
       } catch (e) {
+        console.error(`[renderPage] JSON parse error for ${templateType}:`, e);
         return `<!-- Template JSON parse error: ${templateType} -->`;
       }
     } else {
@@ -1856,6 +1860,18 @@ export class ShopifyLiquidEngine {
   // ============================================
   // HELPERS
   // ============================================
+
+  /**
+   * Strip JavaScript-style comments from JSON content
+   * Shopify theme JSON files include auto-generated block comments
+   */
+  private stripJsonComments(jsonString: string): string {
+    // Remove block comments /* ... */
+    let result = jsonString.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Remove single line comments // ... (but be careful not to remove URLs)
+    result = result.replace(/(?<!:)\/\/[^\n]*/g, '');
+    return result;
+  }
 
   private getDefaultContext(): RenderContext & Record<string, any> {
     const settings = this.loadThemeSettings();
