@@ -250,31 +250,66 @@ export async function listThemeFiles(admin: any, themeId: string): Promise<strin
 
   try {
     const gid = toGid(themeId);
+    const allFiles: string[] = [];
+    let cursor: string | null = null;
+    let hasNextPage = true;
 
-    // Shopify GraphQL doesn't have a direct way to list all files
-    // We need to query with patterns or use REST API
-    // For now, we'll query common file patterns
+    // Use GraphQL pagination to get ALL theme files
+    while (hasNextPage) {
+      const response: Response = await admin.graphql(
+        `#graphql
+        query GetThemeFiles($themeId: ID!, $first: Int!, $after: String) {
+          theme(id: $themeId) {
+            files(first: $first, after: $after) {
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+              nodes {
+                filename
+              }
+            }
+          }
+        }`,
+        {
+          variables: {
+            themeId: gid,
+            first: 250,  // Max per page
+            after: cursor
+          }
+        }
+      );
 
-    const commonFiles = [
-      'templates/index.json',
-      'templates/product.json',
-      'templates/collection.json',
-      'templates/page.json',
-      'templates/blog.json',
-      'templates/article.json',
-      'templates/cart.json',
-      'templates/search.json',
-      'templates/404.json',
-      'templates/list-collections.json',
-      'templates/password.json',
-      'templates/gift_card.liquid',
-      'sections/header-group.json',
-      'sections/footer-group.json',
-      'config/settings_schema.json',
-      'config/settings_data.json'
-    ];
+      const data: any = await response.json();
+      const theme: any = data?.data?.theme;
 
-    return commonFiles;
+      if (!theme?.files?.nodes) {
+        console.log('[Theme] No files found or error in response');
+        break;
+      }
+
+      const files = theme.files.nodes;
+      for (const file of files) {
+        if (file.filename) {
+          allFiles.push(file.filename);
+        }
+      }
+
+      hasNextPage = theme.files.pageInfo.hasNextPage;
+      cursor = theme.files.pageInfo.endCursor;
+
+      console.log(`[Theme] Fetched ${files.length} files, total: ${allFiles.length}, hasNextPage: ${hasNextPage}`);
+    }
+
+    console.log(`[Theme] Total files found: ${allFiles.length}`);
+
+    // Log breakdown by type
+    const sections = allFiles.filter(f => f.startsWith('sections/'));
+    const templates = allFiles.filter(f => f.startsWith('templates/'));
+    const snippets = allFiles.filter(f => f.startsWith('snippets/'));
+    console.log(`[Theme] Breakdown - sections: ${sections.length}, templates: ${templates.length}, snippets: ${snippets.length}`);
+
+    return allFiles;
   } catch (error) {
     console.error('[Theme] Error listing files:', error);
     return [];
