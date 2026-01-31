@@ -7,7 +7,7 @@
 
 import { RemixBrowser } from "@remix-run/react";
 import { startTransition, StrictMode } from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
+import { hydrateRoot } from "react-dom/client";
 
 // Check if we're in proxy mode (accessed via Shopify storefront)
 const isProxyMode = typeof window !== 'undefined' && (
@@ -66,17 +66,27 @@ if (isProxyMode) {
     }
   }
 
-  // Pure Client Render - Clear body and render fresh
-  // Note: createRoot requires a DOM element, not document
+  // Use hydrateRoot but suppress hydration mismatch errors
+  // This is necessary because server renders with proxy.editor route
+  // but client expects apps.vsbuilder.editor route
   startTransition(() => {
-    // Clear any SSR content to avoid hydration mismatch
-    document.body.innerHTML = '<div id="app"></div>';
-    const container = document.getElementById('app')!;
-
-    createRoot(container).render(
+    hydrateRoot(
+      document,
       <StrictMode>
         <RemixBrowser />
-      </StrictMode>
+      </StrictMode>,
+      {
+        onRecoverableError: (error: unknown) => {
+          // Silently ignore hydration mismatch errors in proxy mode
+          // These are expected due to route ID differences
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (errorMessage.includes('Hydration') || errorMessage.includes('hydrat')) {
+            console.debug('[Hydration] Suppressed error:', errorMessage.substring(0, 100));
+          } else {
+            console.error('[React] Error:', error);
+          }
+        }
+      }
     );
   });
 } else {
