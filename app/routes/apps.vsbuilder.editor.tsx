@@ -9,7 +9,7 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { ClientOnlyEditor } from "../components/ClientOnlyEditor";
 import { authenticate } from "../shopify.server";
-import { downloadThemeForEditor, isThemeSavedLocally, saveThemeToLocal } from "../utils/theme.server";
+import { downloadThemeForEditor, saveThemeToLocal } from "../utils/theme.server";
 import { EditorCore } from "./app.editor";
 
 
@@ -95,18 +95,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const shopHandle = session.shop.replace(".myshopify.com", "");
 
-    // Check if theme is synced locally, if not sync it first
-    const isLocallyAvailable = isThemeSavedLocally(shopHandle, themeIdParam);
-    if (!isLocallyAvailable) {
-      console.log(`[Editor] Theme not found locally, syncing...`);
-      const syncResult = await saveThemeToLocal(admin, themeIdParam, shopHandle);
-      if (syncResult) {
-        console.log(`[Editor] Theme synced successfully!`);
-      } else {
-        console.error(`[Editor] Theme sync failed!`);
-      }
+    // Always sync theme to ensure all assets (CSS, JS) are downloaded
+    console.log(`[Editor] Syncing theme files...`);
+    const syncResult = await saveThemeToLocal(admin, themeIdParam, shopHandle);
+    if (syncResult) {
+      console.log(`[Editor] Theme synced successfully!`);
     } else {
-      console.log(`[Editor] Theme already synced locally`);
+      console.error(`[Editor] Theme sync failed!`);
     }
 
     // Download theme data (structure, templates, etc.)
