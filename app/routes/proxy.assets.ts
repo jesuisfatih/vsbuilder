@@ -131,8 +131,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         console.log(`[ProxyAssets] Similar files in assets: ${matchingFiles.slice(0, 5).join(', ') || 'none'}`);
       }
 
-      console.error(`[ProxyAssets] File not found: ${filePath}`);
-      return new Response("Not Found", { status: 404 });
+      // FALLBACK: Redirect to Shopify CDN if file not found locally
+      // This handles files that weren't synced properly
+      console.log(`[ProxyAssets] File not found locally, attempting Shopify CDN fallback: ${sanitizedFile}`);
+
+      // Build Shopify theme asset URL
+      // Format: https://store.myshopify.com/cdn/shop/t/theme-id/assets/filename
+      const shopDomain = shopHandle + ".myshopify.com";
+      const cdnUrl = `https://${shopDomain}/cdn/shop/t/${themeId}/assets/${encodeURIComponent(sanitizedFile)}`;
+
+      // Return a 302 redirect to Shopify CDN
+      return new Response(null, {
+        status: 302,
+        headers: {
+          "Location": cdnUrl,
+          "Cache-Control": "public, max-age=60",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
     }
 
     // Check if it's a .liquid file that needs processing
