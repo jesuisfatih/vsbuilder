@@ -100,22 +100,35 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
+      console.log(`[ProxyAssets] Primary path not found: ${filePath}`);
+
       // Try .liquid version for CSS/JS
       const liquidPath = filePath + ".liquid";
       if (fs.existsSync(liquidPath)) {
+        console.log(`[ProxyAssets] Found .liquid version: ${liquidPath}`);
         return await serveLiquidAsset(liquidPath, themeDir);
       }
 
       // Try without assets prefix
       const altPath = path.join(themeDir, sanitizedFile);
       if (fs.existsSync(altPath)) {
+        console.log(`[ProxyAssets] Found at alt path: ${altPath}`);
         return serveFile(altPath);
       }
 
       // Try .liquid version of alt path
       const altLiquidPath = altPath + ".liquid";
       if (fs.existsSync(altLiquidPath)) {
+        console.log(`[ProxyAssets] Found .liquid at alt path: ${altLiquidPath}`);
         return await serveLiquidAsset(altLiquidPath, themeDir);
+      }
+
+      // List files in assets dir for debugging
+      const assetsDir = path.join(themeDir, "assets");
+      if (fs.existsSync(assetsDir)) {
+        const files = fs.readdirSync(assetsDir);
+        const matchingFiles = files.filter(f => f.includes(sanitizedFile.split('.')[0]));
+        console.log(`[ProxyAssets] Similar files in assets: ${matchingFiles.slice(0, 5).join(', ') || 'none'}`);
       }
 
       console.error(`[ProxyAssets] File not found: ${filePath}`);
@@ -162,13 +175,19 @@ async function serveLiquidAsset(filePath: string, themeDir: string): Promise<Res
 
   const content = fs.readFileSync(filePath, "utf-8");
 
-  // Determine output type from filename (e.g., base.css.liquid -> css)
+  // Determine output type from filename (e.g., base.css.liquid -> css, theme.css.liquid -> css)
+  // Extract the actual extension from the filename before .liquid
+  const baseName = path.basename(filePath);
   let outputType = "text/plain";
   let cacheControl = "public, max-age=3600";
 
-  if (filePath.includes(".css.liquid") || filePath.endsWith(".scss.liquid")) {
+  // Check for CSS files (theme.css.liquid, base.css.liquid, etc.)
+  if (baseName.endsWith(".css.liquid") || baseName.endsWith(".scss.liquid") ||
+      baseName.includes(".css") || filePath.includes(".css")) {
     outputType = "text/css";
-  } else if (filePath.includes(".js.liquid")) {
+  }
+  // Check for JS files (empire.aio.min.js.liquid, etc.)
+  else if (baseName.endsWith(".js.liquid") || baseName.includes(".js") || filePath.includes(".js")) {
     outputType = "application/javascript";
   }
 
