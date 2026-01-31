@@ -219,24 +219,31 @@ export function headers() {
 import type { ClientLoaderFunctionArgs } from "@remix-run/react";
 
 export async function clientLoader({ serverLoader }: ClientLoaderFunctionArgs) {
-  console.log('[apps.vsbuilder.editor] clientLoader - using SSR data');
+  console.log('[apps.vsbuilder.editor] clientLoader - looking for SSR data');
 
   // Try to get data from Remix context (SSR data)
   if (typeof window !== 'undefined') {
     const context = (window as any).__remixContext;
-    const routeId = "routes/apps.vsbuilder.editor";
 
-    // Check various possible locations for loader data
-    const data = context?.state?.loaderData?.[routeId] ||
-                 context?.loaderData?.[routeId];
+    // Server uses proxy.editor route, client expects apps.vsbuilder.editor
+    // We need to check BOTH route IDs
+    const routeIds = [
+      "routes/apps.vsbuilder.editor",  // Client route
+      "routes/proxy.editor",            // Server route (via App Proxy)
+    ];
 
-    if (data) {
-      console.log('[apps.vsbuilder.editor] Found SSR data in context');
-      return data;
+    for (const routeId of routeIds) {
+      const data = context?.state?.loaderData?.[routeId] ||
+                   context?.loaderData?.[routeId];
+
+      if (data) {
+        console.log(`[apps.vsbuilder.editor] Found SSR data from route: ${routeId}`);
+        return data;
+      }
     }
   }
 
-  console.warn('[apps.vsbuilder.editor] No SSR data found');
+  console.warn('[apps.vsbuilder.editor] No SSR data found in any route');
   return null;
 }
 
