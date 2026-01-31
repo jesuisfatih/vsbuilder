@@ -2,6 +2,7 @@
  * 🎨 Proxy API - Local Theme Render
  * Handles local render requests when accessed via App Proxy
  * Route: /proxy/api.render-local
+ * INJECTS CSS/JS inline to bypass proxy issues
  */
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
 import * as fs from "fs";
@@ -43,6 +44,79 @@ function errorHtml(message: string): string {
   </div>
 </body>
 </html>`;
+}
+
+/**
+ * Inject ALL theme CSS files inline
+ */
+function injectAllThemeCSS(html: string, themeDir: string): string {
+  const assetsDir = path.join(themeDir, "assets");
+
+  if (!fs.existsSync(assetsDir)) return html;
+
+  // Priority order for CSS files
+  const cssOrder = [
+    "base.css",
+    "reset.css",
+    "typography.css",
+    "variables.css",
+    "theme.css",
+    "component-",
+    "section-",
+  ];
+
+  let allCSS = "";
+  const processedFiles = new Set<string>();
+
+  try {
+    const files = fs.readdirSync(assetsDir).filter(f => f.endsWith(".css"));
+
+    // Process in priority order first
+    for (const prefix of cssOrder) {
+      for (const file of files) {
+        if (file.startsWith(prefix) || file === prefix) {
+          if (!processedFiles.has(file)) {
+            const content = fs.readFileSync(path.join(assetsDir, file), "utf-8");
+            allCSS += `\n/* === ${file} === */\n${content}\n`;
+            processedFiles.add(file);
+          }
+        }
+      }
+    }
+
+    // Then process remaining CSS files
+    for (const file of files) {
+      if (!processedFiles.has(file)) {
+        const content = fs.readFileSync(path.join(assetsDir, file), "utf-8");
+        allCSS += `\n/* === ${file} === */\n${content}\n`;
+        processedFiles.add(file);
+      }
+    }
+
+    console.log(`[RenderLocal] Injected ${processedFiles.size} CSS files (${allCSS.length} bytes)`);
+  } catch (e) {
+    console.error("[RenderLocal] CSS injection error:", e);
+    return html;
+  }
+
+  if (allCSS) {
+    const cssBlock = `
+<style data-vsbuilder-theme-css="true">
+/* VSBuilder Injected Theme CSS */
+${allCSS}
+</style>
+`;
+
+    if (html.includes("</head>")) {
+      html = html.replace("</head>", `${cssBlock}</head>`);
+    } else if (html.includes("<body")) {
+      html = html.replace("<body", `<head>${cssBlock}</head><body`);
+    } else {
+      html = cssBlock + html;
+    }
+  }
+
+  return html;
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -93,9 +167,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       html = await engine.renderPage(template);
     }
 
+    // ========================================
+    // INLINE CSS INJECTION (Bypass Proxy)
+    // ========================================
+    html = injectAllThemeCSS(html, themeDir);
+
     // Base styles for preview
     const baseStyles = `
-      <style>
+      <style data-editor-preview="true">
         /* Editor preview styles */
         body { margin: 0; padding: 0; }
         .shopify-section { position: relative; }
@@ -109,15 +188,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Get editor communication script
     const editorScript = getMinimalEditorScript();
 
-    // Inject base URL for assets
-    const baseUrl = `/apps/vsbuilder/assets?themeId=${themeId}&shopHandle=${shopHandle}&file=`;
-    html = html.replace(/\/theme-assets\//g, baseUrl);
-    html = html.replace(/\/theme-files\//g, baseUrl);
-
     // Convert shopify:// URLs to CDN URLs
     html = html.replace(/shopify:\/\/shop_images\//g, `https://${session.shop}/cdn/shop/files/`);
     html = html.replace(/shopify:\/\/product_images\//g, `https://${session.shop}/cdn/shop/products/`);
     html = html.replace(/shopify:\/\/collection_images\//g, `https://${session.shop}/cdn/shop/collections/`);
+
+    // Remove broken CDN links (they'll 404 for draft themes)
+    html = html.replace(/<link[^>]*cdn\.shopify\.com[^>]*>/gi, "<!-- CDN link removed -->");
+    html = html.replace(/<script[^>]*cdn\.shopify\.com\/s\/files[^>]*><\/script>/gi, "<!-- CDN script removed -->");
 
     // Inject editor script before </body>
     if (html.includes("</body>")) {
@@ -134,6 +212,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     } else {
       html = baseStyles + html;
     }
+
+    console.log(`[RenderLocal] Rendered ${template} with inline CSS (${html.length} bytes)`);
 
     // Return HTML directly or JSON based on format parameter
     if (returnJson) {
