@@ -58,6 +58,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   } catch (error) {
     console.error("[ProxyApiRender] Error:", error);
-    return json({ error: "Internal server error" }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : "";
+    console.error("[ProxyApiRender] Stack:", errorStack);
+    return json({
+      error: "Internal server error",
+      message: errorMessage,
+      details: process.env.NODE_ENV === "development" ? errorStack : undefined
+    }, { status: 500 });
   }
 };
