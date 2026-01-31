@@ -160,6 +160,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         preRenderedHtml = preRenderedHtml.replace(/\/theme-assets\//g, assetBaseUrl);
         preRenderedHtml = preRenderedHtml.replace(/\/theme-files\//g, assetBaseUrl);
 
+        // Convert shopify:// URLs to actual CDN URLs
+        preRenderedHtml = preRenderedHtml.replace(
+          /shopify:\/\/shop_images\//g,
+          `https://${session.shop}/cdn/shop/files/`
+        );
+        preRenderedHtml = preRenderedHtml.replace(
+          /shopify:\/\/product_images\//g,
+          `https://${session.shop}/cdn/shop/products/`
+        );
+        preRenderedHtml = preRenderedHtml.replace(
+          /shopify:\/\/collection_images\//g,
+          `https://${session.shop}/cdn/shop/collections/`
+        );
+
         // Inject styles and script
         if (preRenderedHtml.includes("</head>")) {
           preRenderedHtml = preRenderedHtml.replace("</head>", `${baseStyles}</head>`);
