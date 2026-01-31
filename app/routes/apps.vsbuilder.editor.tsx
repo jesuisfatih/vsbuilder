@@ -9,7 +9,7 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { ClientOnlyEditor } from "../components/ClientOnlyEditor";
 import { authenticate } from "../shopify.server";
-import { downloadThemeForEditor } from "../utils/theme.server";
+import { downloadThemeForEditor, isThemeSavedLocally, saveThemeToLocal } from "../utils/theme.server";
 import { EditorCore } from "./app.editor";
 
 
