@@ -192,7 +192,7 @@ export async function getThemeById(admin: any, themeId: string): Promise<ThemeIn
 // ============================================
 
 export async function getThemeFiles(admin: any, themeId: string, filenames: string[]): Promise<ThemeFile[]> {
-  console.log('[Theme] Fetching files:', filenames);
+  console.log('[Theme] Fetching files:', filenames.slice(0, 5), filenames.length > 5 ? `... (${filenames.length} total)` : '');
 
   try {
     const gid = toGid(themeId);
@@ -207,6 +207,9 @@ export async function getThemeFiles(admin: any, themeId: string, filenames: stri
               body {
                 ... on OnlineStoreThemeFileBodyText {
                   content
+                }
+                ... on OnlineStoreThemeFileBodyBase64 {
+                  contentBase64
                 }
               }
             }
@@ -229,12 +232,23 @@ export async function getThemeFiles(admin: any, themeId: string, filenames: stri
 
     const nodes = data.data?.theme?.files?.nodes || [];
     console.log('[Theme] Found', nodes.length, 'files');
-    console.log('[Theme] Returned filenames:', nodes.map((n: any) => n.filename));
 
-    return nodes.map((node: any) => ({
-      filename: node.filename,
-      content: node.body?.content || null
-    }));
+    return nodes.map((node: any) => {
+      let content: string | null = null;
+
+      if (node.body?.content) {
+        // Text content (Liquid, JSON, etc.)
+        content = node.body.content;
+      } else if (node.body?.contentBase64) {
+        // Base64 content (CSS, JS, images, fonts)
+        content = Buffer.from(node.body.contentBase64, 'base64').toString('utf-8');
+      }
+
+      return {
+        filename: node.filename,
+        content
+      };
+    });
   } catch (error) {
     console.error('[Theme] Error fetching files:', error);
     return [];
@@ -763,14 +777,27 @@ export async function saveThemeToLocal(
     const allFiles = await listThemeFiles(admin, themeId);
     console.log(`[Theme] Found ${allFiles.length} files to download`);
 
+    // Log file types breakdown
+    const assetsCount = allFiles.filter(f => f.startsWith('assets/')).length;
+    const cssCount = allFiles.filter(f => f.endsWith('.css') || f.endsWith('.css.liquid')).length;
+    const jsCount = allFiles.filter(f => f.endsWith('.js')).length;
+    console.log(`[Theme] Breakdown - assets: ${assetsCount}, css: ${cssCount}, js: ${jsCount}`);
+
     // Download in batches of 10
     const batchSize = 10;
+    let savedCount = 0;
+    let skippedCount = 0;
+
     for (let i = 0; i < allFiles.length; i += batchSize) {
       const batch = allFiles.slice(i, i + batchSize);
       const files = await getThemeFiles(admin, themeId, batch);
 
       for (const file of files) {
-        if (!file.content) continue;
+        if (!file.content) {
+          skippedCount++;
+          console.log(`[Theme] Skipped (no content): ${file.filename}`);
+          continue;
+        }
 
         const filePath = path.join(themeDir, file.filename);
         const fileDir = path.dirname(filePath);
@@ -782,12 +809,14 @@ export async function saveThemeToLocal(
 
         // Write file
         fs.writeFileSync(filePath, file.content, 'utf-8');
+        savedCount++;
       }
 
-      console.log(`[Theme] Downloaded batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(allFiles.length / batchSize)}`);
+      console.log(`[Theme] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(allFiles.length / batchSize)} - saved: ${savedCount}, skipped: ${skippedCount}`);
     }
 
-    console.log(`[Theme] Theme saved to: ${themeDir}`);
+    console.log(`[Theme] ✅ Theme saved to: ${themeDir}`);
+    console.log(`[Theme] ✅ Total files saved: ${savedCount}, skipped: ${skippedCount}`);
     return true;
   } catch (error) {
     console.error('[Theme] Error saving theme to local:', error);
