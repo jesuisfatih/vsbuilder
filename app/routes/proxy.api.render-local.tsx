@@ -80,6 +80,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const engine = createShopifyLiquidEngine(themeDir);
 
+    // Set asset context for proper URL generation
+    engine.setAssetContext(themeId, shopHandle, session.shop);
+
     let html: string;
 
     if (sectionId) {

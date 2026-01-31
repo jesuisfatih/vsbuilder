@@ -78,6 +78,38 @@ export interface RenderContext {
 }
 
 // ============================================
+// REQUEST-SAFE RENDER STACK
+// ============================================
+
+/**
+ * Request-safe render depth tracker
+ * Prevents infinite recursion in nested render/include calls
+ */
+class RenderStack {
+  private depth = 0;
+  private readonly MAX: number;
+
+  constructor(maxDepth: number = 50) {
+    this.MAX = maxDepth;
+  }
+
+  enter(): void {
+    this.depth++;
+    if (this.depth > this.MAX) {
+      throw new Error(`Max render depth exceeded (${this.MAX}). Possible infinite loop in render/include.`);
+    }
+  }
+
+  exit(): void {
+    this.depth--;
+  }
+
+  get current(): number {
+    return this.depth;
+  }
+}
+
+// ============================================
 // SHOPIFY LIQUID ENGINE
 // ============================================
 
@@ -89,6 +121,11 @@ export class ShopifyLiquidEngine {
   private locales: Record<string, any> = {};
   private renderDepth: number = 0;
   private maxRenderDepth: number = 50;
+
+  // Asset URL generation params
+  private themeId: string = "";
+  private shopHandle: string = "";
+  private shopDomain: string = "";
 
   constructor(themeDir: string) {
     this.themeDir = themeDir;
@@ -107,6 +144,9 @@ export class ShopifyLiquidEngine {
       jsTruthy: true, // Use JavaScript truthiness
       // NOTE: outputEscape removed - we need raw HTML output for theme templates
     });
+
+    // NOTE: We add __themeDir, __renderStack to context in render methods
+    // since LiquidJS doesn't have registerGlobal
 
     this.registerShopifyTags();
     this.registerShopifyFilters();
@@ -162,6 +202,72 @@ export class ShopifyLiquidEngine {
       if (value === undefined) break;
     }
     return typeof value === "string" ? value : key.split(".").pop() || key;
+  }
+
+  // Resolve a variable path (like "product.title" or "section.settings.color")
+  private resolveVariable(expr: string, context: Record<string, any>): any {
+    if (!expr) return undefined;
+
+    // Handle string literals
+    if ((expr.startsWith("'") && expr.endsWith("'")) || (expr.startsWith('"') && expr.endsWith('"'))) {
+      return expr.slice(1, -1);
+    }
+
+    // Handle numbers
+    if (!isNaN(Number(expr))) {
+      return Number(expr);
+    }
+
+    // Handle boolean
+    if (expr === "true") return true;
+    if (expr === "false") return false;
+    if (expr === "nil" || expr === "null") return null;
+
+    // Split by dot and resolve
+    const parts = expr.split(".");
+    let value: any = context;
+    for (const part of parts) {
+      // Handle array access like "items[0]"
+      const arrayMatch = part.match(/^(\w+)\[(\d+)\]$/);
+      if (arrayMatch) {
+        value = value?.[arrayMatch[1]]?.[parseInt(arrayMatch[2], 10)];
+      } else {
+        value = value?.[part];
+      }
+      if (value === undefined) return undefined;
+    }
+    return value;
+  }
+
+  // Set asset context for URL generation
+  setAssetContext(themeId: string, shopHandle: string, shopDomain?: string) {
+    this.themeId = themeId;
+    this.shopHandle = shopHandle;
+    this.shopDomain = shopDomain || "";
+    console.log(`[LiquidEngine] Asset context set: themeId=${themeId}, shopHandle=${shopHandle}`);
+  }
+
+  // Get asset URL with proper proxy path
+  private getAssetUrl(asset: string): string {
+    if (!asset) return "";
+
+    // If already a full URL, return as is
+    if (asset.startsWith('http://') || asset.startsWith('https://') || asset.startsWith('//')) {
+      // But convert Shopify CDN URLs to our proxy
+      if (asset.includes('cdn.shopify.com') && this.themeId && this.shopHandle) {
+        const filename = asset.split('/').pop()?.split('?')[0] || asset;
+        return `/apps/vsbuilder/assets?themeId=${this.themeId}&shopHandle=${this.shopHandle}&file=${filename}`;
+      }
+      return asset;
+    }
+
+    // Generate proxy URL
+    if (this.themeId && this.shopHandle) {
+      return `/apps/vsbuilder/assets?themeId=${this.themeId}&shopHandle=${this.shopHandle}&file=${asset}`;
+    }
+
+    // Fallback to simple path
+    return `/theme-assets/${asset}`;
   }
 
   // ============================================
@@ -417,6 +523,75 @@ export class ShopifyLiquidEngine {
           return `<!-- Snippet Error: ${this.snippetName} -->`;
         } finally {
           self.renderDepth--;
+        }
+      },
+    });
+
+    // {% include 'snippet-name' %} - Legacy tag with context leak
+    // Unlike render, include leaks variables back to parent scope
+    this.engine.registerTag("include", {
+      parse(tagToken: any) {
+        const args = tagToken.args.trim();
+        const match = args.match(/['"]([^'"]+)['"]/);
+        this.snippetName = match ? match[1] : args.split(/\s|,/)[0].replace(/['"]/g, "");
+
+        // Parse additional assignments like: {% include 'snippet' with product %}
+        this.withVar = null;
+        const withMatch = args.match(/with\s+([\w.]+)/);
+        if (withMatch) {
+          this.withVar = withMatch[1];
+        }
+
+        // Parse named assignments: {% include 'snippet', var: value %}
+        this.assignments = [];
+        const assignMatches = args.matchAll(/(\w+)\s*:\s*([\w.'"]+)/g);
+        for (const match of assignMatches) {
+          this.assignments.push({ key: match[1], expr: match[2] });
+        }
+      },
+      async render(scope: any) {
+        const safeType = self.sanitizePath(this.snippetName);
+        const snippetPath = path.join(self.themeDir, "snippets", `${safeType}.liquid`);
+
+        if (!fs.existsSync(snippetPath)) {
+          return `<!-- include not found: ${safeType} -->`;
+        }
+
+        const snippetContent = fs.readFileSync(snippetPath, "utf-8");
+
+        // Get parent context - include LEAKS to parent (unlike render which sandboxes)
+        const parentContext = scope.getAll();
+
+        // Resolve with variable
+        if (this.withVar) {
+          const value = self.resolveVariable(this.withVar, parentContext);
+          parentContext[this.snippetName.replace(/-/g, "_")] = value;
+        }
+
+        // Resolve named assignments
+        for (const { key, expr } of this.assignments) {
+          const value = expr.startsWith("'") || expr.startsWith('"')
+            ? expr.slice(1, -1)
+            : self.resolveVariable(expr, parentContext);
+          parentContext[key] = value;
+        }
+
+        try {
+          // Render with parent context directly (allows leak)
+          const result = await self.engine.parseAndRender(snippetContent, parentContext);
+
+          // Copy any new/changed variables back to parent scope (context leak)
+          // This is the key difference from render tag
+          for (const [key, value] of Object.entries(parentContext)) {
+            if (!key.startsWith("__") && typeof scope.set === "function") {
+              scope.set(key, value);
+            }
+          }
+
+          return result;
+        } catch (error) {
+          console.error(`Error in include ${this.snippetName}:`, error);
+          return `<!-- include error: ${this.snippetName} -->`;
         }
       },
     });
@@ -1009,10 +1184,15 @@ export class ShopifyLiquidEngine {
       },
     });
 
-    // {% paginate %} ... {% endpaginate %}
+    // {% paginate collection.products by 12 %} ... {% endpaginate %}
     this.engine.registerTag("paginate", {
       parse(tagToken: any, remainTokens: any[]) {
-        this.paginateArgs = tagToken.args;
+        // Parse: collection.products by 12
+        const args = tagToken.args.trim();
+        const byMatch = args.match(/(.+?)\s+by\s+(\d+)/i);
+        this.collectionExpr = byMatch ? byMatch[1].trim() : args;
+        this.pageSize = byMatch ? parseInt(byMatch[2], 10) : 12;
+
         this.paginateContent = "";
         let token;
         while ((token = remainTokens.shift())) {
@@ -1022,16 +1202,68 @@ export class ShopifyLiquidEngine {
       },
       async render(scope: any) {
         const parentContext = scope.getAll();
-        // Create a mock paginate object
+        const pageSize = this.pageSize || 12;
+
+        // Try to get collection from context
+        let items: any[] = [];
+        try {
+          const parts = this.collectionExpr.split('.');
+          let value = parentContext;
+          for (const part of parts) {
+            value = value?.[part];
+          }
+          if (Array.isArray(value)) {
+            items = value;
+          } else if (value?.products) {
+            items = value.products;
+          }
+        } catch (e) {
+          // Ignore - use empty array
+        }
+
+        const totalItems = items.length || pageSize;
+        const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+        const currentPage = 1; // In editor, always page 1
+
+        // Build parts array for pagination UI
+        const parts: any[] = [];
+        for (let i = 1; i <= Math.min(totalPages, 5); i++) {
+          parts.push({
+            title: String(i),
+            url: `?page=${i}`,
+            is_link: i !== currentPage,
+            is_current: i === currentPage,
+          });
+        }
+
+        // Add ellipsis if more pages
+        if (totalPages > 5) {
+          parts.push({ title: "…", is_link: false, is_current: false });
+          parts.push({
+            title: String(totalPages),
+            url: `?page=${totalPages}`,
+            is_link: true,
+            is_current: false,
+          });
+        }
+
+        // Complete Shopify-compatible paginate object
         const paginate = {
-          current_page: 1,
+          current_page: currentPage,
           current_offset: 0,
-          items: 12,
-          parts: [],
-          pages: 1,
+          items: totalItems,
+          parts,
+          pages: totalPages,
+          page_size: pageSize,
           previous: null,
-          next: null,
-          page_size: 12,
+          next: totalPages > 1 ? {
+            title: "Next",
+            url: "?page=2",
+            is_link: true,
+          } : null,
+          // Aliases used by some themes
+          first: { title: "1", url: "?page=1" },
+          last: { title: String(totalPages), url: `?page=${totalPages}` },
         };
 
         const content = await self.engine.parseAndRender(this.paginateContent, {
@@ -1069,7 +1301,7 @@ export class ShopifyLiquidEngine {
       },
     });
 
-    // {% content_for 'header' %} - Shopify content blocks
+    // {% content_for 'header' %} - Shopify content blocks with buffer system
     this.engine.registerTag("content_for", {
       parse(tagToken: any, remainTokens: any[]) {
         this.contentName = tagToken.args.replace(/['"]/g, "").trim();
@@ -1080,35 +1312,218 @@ export class ShopifyLiquidEngine {
           this.contentBody += token.raw || token.getText?.() || "";
         }
       },
-      render() {
-        // content_for captures content, doesn't output
+      async render(scope: any) {
+        const ctx = scope.getAll();
+        const bufferName = `__content_for_${this.contentName}`;
+
+        // Render the content
+        const rendered = await self.engine.parseAndRender(this.contentBody, ctx);
+
+        // Accumulate in buffer (don't overwrite)
+        const existing = ctx[bufferName] || "";
+        scope.set(bufferName, existing + rendered);
+
+        // Also set on global context if available
+        if (ctx.__contentBuffers) {
+          ctx.__contentBuffers[this.contentName] = (ctx.__contentBuffers[this.contentName] || "") + rendered;
+        }
+
+        // content_for captures content, doesn't output inline
         return "";
       },
     });
 
-    // {% increment var %} - Creates a counter
+    // Helper tag to output captured content_for blocks
+    // Used in layout: {{ content_for_header }}
+    this.engine.registerTag("output_content_for", {
+      parse(tagToken: any) {
+        this.contentName = tagToken.args.replace(/['"]/g, "").trim();
+      },
+      render(scope: any) {
+        const ctx = scope.getAll();
+        return ctx[`__content_for_${this.contentName}`] || ctx.__contentBuffers?.[this.contentName] || "";
+      },
+    });
+
+    // {% increment var %} - Creates a page-global counter
     this.engine.registerTag("increment", {
       parse(tagToken: any) {
         this.varName = tagToken.args.trim();
       },
       render(scope: any) {
         const ctx = scope.getAll();
-        const current = ctx[`__increment_${this.varName}`] || 0;
-        scope.set(`__increment_${this.varName}`, current + 1);
+        // Use page-global counter (stored at context root)
+        const counterKey = `__global_increment_${this.varName}`;
+        const current = ctx[counterKey] ?? 0;
+        scope.set(counterKey, current + 1);
+        // Also make it accessible as just the variable name
+        scope.set(this.varName, current);
         return String(current);
       },
     });
 
-    // {% decrement var %} - Creates a decrementing counter
+    // {% decrement var %} - Creates a page-global decrementing counter
     this.engine.registerTag("decrement", {
       parse(tagToken: any) {
         this.varName = tagToken.args.trim();
       },
       render(scope: any) {
         const ctx = scope.getAll();
-        const current = ctx[`__decrement_${this.varName}`] ?? -1;
-        scope.set(`__decrement_${this.varName}`, current - 1);
+        const counterKey = `__global_decrement_${this.varName}`;
+        const current = ctx[counterKey] ?? -1;
+        scope.set(counterKey, current - 1);
+        scope.set(this.varName, current);
         return String(current);
+      },
+    });
+
+    // {% tablerow item in array cols:3 %} ... {% endtablerow %}
+    this.engine.registerTag("tablerow", {
+      parse(tagToken: any, remainTokens: any[]) {
+        const args = tagToken.args;
+        // Parse: item in collection cols:X limit:Y offset:Z
+        const match = args.match(/(\w+)\s+in\s+([\w.]+)/);
+        this.itemVar = match ? match[1] : "item";
+        this.arrayExpr = match ? match[2] : args;
+
+        // Parse options
+        this.cols = 3;
+        this.limit = undefined;
+        this.offset = 0;
+
+        const colsMatch = args.match(/cols:\s*(\d+)/);
+        if (colsMatch) this.cols = parseInt(colsMatch[1], 10);
+
+        const limitMatch = args.match(/limit:\s*(\d+)/);
+        if (limitMatch) this.limit = parseInt(limitMatch[1], 10);
+
+        const offsetMatch = args.match(/offset:\s*(\d+)/);
+        if (offsetMatch) this.offset = parseInt(offsetMatch[1], 10);
+
+        this.tableContent = "";
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "endtablerow") break;
+          this.tableContent += token.raw || token.getText?.() || "";
+        }
+      },
+      async render(scope: any) {
+        const ctx = scope.getAll();
+
+        // Resolve array
+        let array: any[] = [];
+        try {
+          const parts = this.arrayExpr.split(".");
+          let value = ctx;
+          for (const part of parts) {
+            value = value?.[part];
+          }
+          if (Array.isArray(value)) array = value;
+        } catch (e) {
+          // Ignore
+        }
+
+        // Apply offset and limit
+        if (this.offset) array = array.slice(this.offset);
+        if (this.limit) array = array.slice(0, this.limit);
+
+        if (array.length === 0) return "";
+
+        const cols = this.cols || 3;
+        let html = "";
+
+        for (let i = 0; i < array.length; i++) {
+          const col = (i % cols) + 1;
+          const isColFirst = col === 1;
+          const isColLast = col === cols || i === array.length - 1;
+          const isFirst = i === 0;
+          const isLast = i === array.length - 1;
+
+          // Open row
+          if (isColFirst) {
+            html += `<tr class="row${Math.floor(i / cols) + 1}">`;
+          }
+
+          // Render cell with tablerowloop object
+          const cellContext = {
+            ...ctx,
+            [this.itemVar]: array[i],
+            tablerowloop: {
+              index: i + 1,
+              index0: i,
+              first: isFirst,
+              last: isLast,
+              length: array.length,
+              rindex: array.length - i,
+              rindex0: array.length - i - 1,
+              col: col,
+              col0: col - 1,
+              col_first: isColFirst,
+              col_last: isColLast,
+              row: Math.floor(i / cols) + 1,
+            },
+            forloop: {
+              index: i + 1,
+              index0: i,
+              first: isFirst,
+              last: isLast,
+              length: array.length,
+              rindex: array.length - i,
+              rindex0: array.length - i - 1,
+            },
+          };
+
+          const cellContent = await self.engine.parseAndRender(this.tableContent, cellContext);
+          html += `<td class="col${col}">${cellContent}</td>`;
+
+          // Close row
+          if (isColLast) {
+            html += "</tr>";
+          }
+        }
+
+        return html;
+      },
+    });
+
+    // {% cycle 'group': 'a', 'b', 'c' %} - with named group support
+    this.engine.registerTag("cycle", {
+      parse(tagToken: any) {
+        const args = tagToken.args;
+
+        // Parse group name if present
+        const groupMatch = args.match(/^['"]([^'"]+)['"]\s*:/);
+        this.groupName = groupMatch ? groupMatch[1] : "__default_cycle";
+
+        // Parse values (after group name if present)
+        const valuesStr = groupMatch ? args.slice(groupMatch[0].length) : args;
+        this.values = [];
+
+        // Extract quoted values
+        const valueMatches = valuesStr.matchAll(/['"]([^'"]*)['"]/g);
+        for (const match of valueMatches) {
+          this.values.push(match[1]);
+        }
+
+        // If no quoted values found, try comma-separated
+        if (this.values.length === 0) {
+          this.values = valuesStr.split(",").map((v: string) => v.trim().replace(/['"]/g, ""));
+        }
+      },
+      render(scope: any) {
+        const ctx = scope.getAll();
+        const cycleKey = `__cycle_${this.groupName}`;
+
+        // Get current index for this group (page-global)
+        const currentIndex = ctx[cycleKey] ?? 0;
+
+        // Get value
+        const value = this.values[currentIndex % this.values.length] || "";
+
+        // Increment for next call
+        scope.set(cycleKey, currentIndex + 1);
+
+        return value;
       },
     });
   }
@@ -1122,36 +1537,58 @@ export class ShopifyLiquidEngine {
 
     // Asset URL filter
     this.engine.registerFilter("asset_url", (asset: string) => {
-      return `/theme-assets/${asset}`;
+      return self.getAssetUrl(asset);
     });
 
     this.engine.registerFilter("asset_img_url", (asset: string, size?: string) => {
-      return `/theme-assets/${asset}`;
+      const url = self.getAssetUrl(asset);
+      // Add size parameter if needed
+      if (size && url.includes('?')) {
+        return `${url}&size=${size}`;
+      }
+      return url;
     });
 
     // Stylesheet and script tag filters
     this.engine.registerFilter("stylesheet_tag", (url: string) => {
       if (!url) return "";
-      return `<link rel="stylesheet" href="${url}" type="text/css">`;
+      // Convert /theme-assets/ to proper proxy URL
+      const finalUrl = url.startsWith('/theme-assets/')
+        ? self.getAssetUrl(url.replace('/theme-assets/', ''))
+        : url;
+      return `<link rel="stylesheet" href="${finalUrl}" type="text/css">`;
     });
 
     this.engine.registerFilter("script_tag", (url: string) => {
       if (!url) return "";
-      return `<script src="${url}" type="text/javascript"></script>`;
+      // Convert /theme-assets/ to proper proxy URL
+      const finalUrl = url.startsWith('/theme-assets/')
+        ? self.getAssetUrl(url.replace('/theme-assets/', ''))
+        : url;
+      return `<script src="${finalUrl}" type="text/javascript"></script>`;
     });
 
     this.engine.registerFilter("preload_tag", (url: string, asType?: string) => {
       if (!url) return "";
-      const as = asType || (url.endsWith('.css') ? 'style' : url.endsWith('.js') ? 'script' : 'fetch');
-      return `<link rel="preload" href="${url}" as="${as}">`;
+      const finalUrl = url.startsWith('/theme-assets/')
+        ? self.getAssetUrl(url.replace('/theme-assets/', ''))
+        : url;
+      const as = asType || (finalUrl.endsWith('.css') ? 'style' : finalUrl.endsWith('.js') ? 'script' : 'fetch');
+      return `<link rel="preload" href="${finalUrl}" as="${as}">`;
     });
 
     // Font filters
     this.engine.registerFilter("font_url", (font: any, format?: string) => {
       if (!font) return "";
-      if (typeof font === 'string') return font;
+      if (typeof font === 'string') {
+        // If it's a filename, use getAssetUrl
+        if (!font.startsWith('http') && !font.startsWith('//')) {
+          return self.getAssetUrl(font);
+        }
+        return font;
+      }
       // Handle Shopify font objects
-      return font.url || font.src || `/theme-assets/fonts/${font.family || 'default'}.woff2`;
+      return font.url || font.src || self.getAssetUrl(`fonts/${font.family || 'default'}.woff2`);
     });
 
     this.engine.registerFilter("font_face", (font: any, options?: any) => {
@@ -2828,6 +3265,291 @@ export class ShopifyLiquidEngine {
         return "";
       }
     });
+
+    // ============================================
+    // IMAGE FILTERS - FULL SHOPIFY 2026 COMPAT
+    // ============================================
+
+    // image_url - with named args support (width:, height:, crop:, format:)
+    this.engine.registerFilter("image_url", (image: any, ...args: any[]) => {
+      if (!image) return "";
+
+      // Get base URL
+      let src = "";
+      if (typeof image === "string") {
+        src = image;
+      } else if (image.src) {
+        src = image.src;
+      } else if (image.url) {
+        src = image.url;
+      }
+
+      if (!src) return "";
+
+      // Parse named arguments
+      let width: number | undefined;
+      let height: number | undefined;
+      let crop: string | undefined;
+      let format: string | undefined;
+
+      // Handle positional arg (size string like "300x300")
+      if (args.length === 1 && typeof args[0] === "string" && /^\d+x\d+$/.test(args[0])) {
+        const [w, h] = args[0].split("x").map(Number);
+        width = w;
+        height = h;
+      } else {
+        // Parse hash arguments
+        for (const arg of args) {
+          if (typeof arg === "object" && arg !== null) {
+            if (arg.width) width = arg.width;
+            if (arg.height) height = arg.height;
+            if (arg.crop) crop = arg.crop;
+            if (arg.format) format = arg.format;
+          } else if (typeof arg === "number") {
+            width = arg;
+          }
+        }
+      }
+
+      // Build URL with parameters
+      const params = new URLSearchParams();
+      if (width) params.set("width", String(width));
+      if (height) params.set("height", String(height));
+      if (crop) params.set("crop", crop);
+      if (format) params.set("format", format);
+
+      const paramStr = params.toString();
+      return paramStr ? `${src}${src.includes("?") ? "&" : "?"}${paramStr}` : src;
+    });
+
+    // image_tag - with srcset/sizes support
+    this.engine.registerFilter("image_tag", (image: any, ...args: any[]) => {
+      if (!image) return "";
+
+      let src = typeof image === "string" ? image : (image.src || image.url || "");
+      const alt = typeof image === "object" ? (image.alt || "") : "";
+
+      if (!src) return "";
+
+      // Parse arguments
+      let widths: number[] = [];
+      let sizes = "";
+      let loading = "lazy";
+      let cssClass = "";
+      let otherAttrs: string[] = [];
+
+      for (const arg of args) {
+        if (typeof arg === "object" && arg !== null) {
+          if (arg.widths) {
+            widths = String(arg.widths).split(",").map((w: string) => parseInt(w.trim(), 10)).filter((n: number) => !isNaN(n));
+          }
+          if (arg.sizes) sizes = arg.sizes;
+          if (arg.loading) loading = arg.loading;
+          if (arg.class) cssClass = arg.class;
+          if (arg.preload) loading = "eager";
+        }
+      }
+
+      // Build srcset if widths provided
+      let srcset = "";
+      if (widths.length > 0) {
+        srcset = widths.map(w => `${src}${src.includes("?") ? "&" : "?"}width=${w} ${w}w`).join(", ");
+      }
+
+      // Build tag
+      let tag = `<img src="${src}"`;
+      if (alt) tag += ` alt="${alt.replace(/"/g, '&quot;')}"`;
+      if (srcset) tag += ` srcset="${srcset}"`;
+      if (sizes) tag += ` sizes="${sizes}"`;
+      tag += ` loading="${loading}"`;
+      if (cssClass) tag += ` class="${cssClass}"`;
+      tag += ">";
+
+      return tag;
+    });
+
+    // ============================================
+    // METAFIELD TYPE-AWARE RENDERING
+    // ============================================
+
+    // Full metafield_tag with type support
+    this.engine.registerFilter("metafield_tag", (metafield: any) => {
+      if (!metafield) return "";
+
+      const value = metafield.value ?? metafield;
+      const type = metafield.type || "single_line_text_field";
+
+      switch (type) {
+        case "rich_text_field":
+          return value; // Already HTML
+
+        case "file_reference":
+          if (typeof value === "object" && value.url) {
+            const isImage = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(value.url);
+            if (isImage) {
+              return `<img src="${value.url}" alt="${value.alt || ""}" loading="lazy">`;
+            }
+            return `<a href="${value.url}">${value.filename || "Download"}</a>`;
+          }
+          return `<img src="${value}" loading="lazy">`;
+
+        case "product_reference":
+          if (typeof value === "object") {
+            return `<a href="${value.url || `/products/${value.handle}`}">${value.title || "Product"}</a>`;
+          }
+          return String(value);
+
+        case "collection_reference":
+          if (typeof value === "object") {
+            return `<a href="${value.url || `/collections/${value.handle}`}">${value.title || "Collection"}</a>`;
+          }
+          return String(value);
+
+        case "page_reference":
+          if (typeof value === "object") {
+            return `<a href="${value.url || `/pages/${value.handle}`}">${value.title || "Page"}</a>`;
+          }
+          return String(value);
+
+        case "url":
+          return `<a href="${value}">${value}</a>`;
+
+        case "date":
+        case "date_time":
+          try {
+            return new Date(value).toLocaleDateString();
+          } catch {
+            return String(value);
+          }
+
+        case "money":
+          const amount = typeof value === "object" ? value.amount : value;
+          const currency = typeof value === "object" ? value.currency_code : "USD";
+          return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(amount) / 100);
+
+        case "rating":
+          if (typeof value === "object") {
+            const rating = value.value || value.rating || 0;
+            const scale = value.scale_max || 5;
+            return `<span class="rating">${"★".repeat(Math.round(rating))}${"☆".repeat(scale - Math.round(rating))}</span>`;
+          }
+          return String(value);
+
+        case "list.single_line_text_field":
+        case "list.product_reference":
+        case "list.page_reference":
+          if (Array.isArray(value)) {
+            return `<ul>${value.map(v => `<li>${v}</li>`).join("")}</ul>`;
+          }
+          return String(value);
+
+        case "boolean":
+          return value ? "Yes" : "No";
+
+        case "color":
+          return `<span class="color-swatch" style="background-color: ${value}"></span>`;
+
+        case "dimension":
+        case "weight":
+        case "volume":
+          if (typeof value === "object") {
+            return `${value.value} ${value.unit}`;
+          }
+          return String(value);
+
+        case "json":
+          return `<pre>${JSON.stringify(value, null, 2)}</pre>`;
+
+        default:
+          return String(value);
+      }
+    });
+
+    // ============================================
+    // ARRAY FILTERS - SHOPIFY 2026
+    // ============================================
+
+    // group_by - group array by key
+    this.engine.registerFilter("group_by", (array: any[], key: string) => {
+      if (!Array.isArray(array)) return {};
+
+      return array.reduce((groups: Record<string, any[]>, item) => {
+        const value = item?.[key] ?? "other";
+        if (!groups[value]) groups[value] = [];
+        groups[value].push(item);
+        return groups;
+      }, {});
+    });
+
+    // concat - combine arrays
+    this.engine.registerFilter("concat", (array: any[], other: any[]) => {
+      if (!Array.isArray(array)) return other || [];
+      if (!Array.isArray(other)) return array;
+      return [...array, ...other];
+    });
+
+    // reverse - reverse array
+    this.engine.registerFilter("reverse", (array: any[]) => {
+      if (!Array.isArray(array)) return array;
+      return [...array].reverse();
+    });
+
+    // sum - sum array values
+    this.engine.registerFilter("sum", (array: any[], key?: string) => {
+      if (!Array.isArray(array)) return 0;
+      return array.reduce((sum, item) => {
+        const value = key ? item?.[key] : item;
+        return sum + (Number(value) || 0);
+      }, 0);
+    });
+
+    // ============================================
+    // PLACEHOLDER SVG - FULL SEMANTIC
+    // ============================================
+
+    // Enhanced placeholder_svg_tag with ARIA and full attributes
+    this.engine.registerFilter("placeholder_svg_tag", (name: string, cssClass?: string) => {
+      const cls = cssClass || "placeholder-svg";
+      const placeholders: Record<string, { label: string; color: string }> = {
+        "image": { label: "Image", color: "#ddd" },
+        "product-1": { label: "Product", color: "#e8e8e8" },
+        "product-2": { label: "Product", color: "#e0e0e0" },
+        "product-3": { label: "Product", color: "#d8d8d8" },
+        "collection-1": { label: "Collection", color: "#e5e5e5" },
+        "collection-2": { label: "Collection", color: "#ddd" },
+        "lifestyle-1": { label: "Lifestyle", color: "#e8e8e8" },
+        "lifestyle-2": { label: "Lifestyle", color: "#e0e0e0" },
+        "hero-apparel-1": { label: "Hero", color: "#d5d5d5" },
+        "hero-apparel-2": { label: "Hero", color: "#d0d0d0" },
+      };
+
+      const placeholder = placeholders[name] || { label: name || "Placeholder", color: "#ddd" };
+
+      return `<svg class="${cls}" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 525 525" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${placeholder.label}">
+        <rect fill="${placeholder.color}" width="525" height="525"/>
+        <text fill="#999" x="50%" y="50%" dy=".1em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="48">${placeholder.label}</text>
+      </svg>`;
+    });
+
+    // ============================================
+    // CONTENT FOR HEADER AUTOMATION
+    // ============================================
+
+    // content_for_header - generate Shopify-like header content
+    this.engine.registerFilter("content_for_header", () => {
+      return `
+<!-- Shopify Theme Editor Compatible Header -->
+<meta name="theme-color" content="#ffffff">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://cdn.shopify.com" crossorigin>
+<link rel="preconnect" href="https://fonts.shopifycdn.com" crossorigin>
+<script>
+  window.Shopify = window.Shopify || {};
+  window.Shopify.theme = { name: "VSBuilder Theme", id: Date.now() };
+  window.Shopify.routes = { root: "/" };
+</script>
+      `.trim();
+    });
   }
 
   // ============================================
@@ -2925,6 +3647,8 @@ export class ShopifyLiquidEngine {
       block: null,
       // forloop helper for sections in templates
       forloop: context.forloop || { first: true, last: true, index: 1, index0: 0, length: 1, rindex: 1, rindex0: 0 },
+      // Internal context for tags
+      __themeDir: this.themeDir,
     };
 
     try {

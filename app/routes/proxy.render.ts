@@ -71,6 +71,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Create Liquid engine
     const engine = createShopifyLiquidEngine(themeDir);
 
+    // Set asset context for proper URL generation
+    engine.setAssetContext(cleanThemeId, shopHandle, session.shop);
+
     let html: string;
 
     if (sectionId) {
