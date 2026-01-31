@@ -911,13 +911,25 @@ export class ShopifyLiquidEngine {
     });
 
     // {% liquid %}...{% endliquid %} - Multi-line liquid tag
+    // IMPORTANT: In Shopify, {% liquid %} is an inline tag with content in the args
+    // It does NOT have an endliquid closing tag
     this.engine.registerTag("liquid", {
       parse(tagToken: any, remainTokens: any[]) {
-        this.liquidContent = "";
-        let token;
-        while ((token = remainTokens.shift())) {
-          if (token.name === "endliquid") break;
-          this.liquidContent += token.raw || token.getText?.() || "";
+        // The content is in tagToken.args, not in child tokens
+        // {% liquid
+        //   assign x = 1
+        //   echo x
+        // %}
+        // The content between {% liquid and %} is in args
+        this.liquidContent = tagToken.args || "";
+
+        // If args is empty, try to read as block (for compatibility)
+        if (!this.liquidContent.trim()) {
+          let token;
+          while ((token = remainTokens.shift())) {
+            if (token.name === "endliquid") break;
+            this.liquidContent += token.raw || token.getText?.() || "";
+          }
         }
       },
       async render(scope: any) {
@@ -937,14 +949,30 @@ export class ShopifyLiquidEngine {
                      trimmed.startsWith("endif") || trimmed.startsWith("for ") ||
                      trimmed.startsWith("endfor") || trimmed.startsWith("unless ") ||
                      trimmed.startsWith("endunless") || trimmed.startsWith("case ") ||
-                     trimmed.startsWith("when ") || trimmed.startsWith("endcase")) {
+                     trimmed.startsWith("when ") || trimmed.startsWith("endcase") ||
+                     trimmed.startsWith("capture ") || trimmed.startsWith("endcapture") ||
+                     trimmed.startsWith("break") || trimmed.startsWith("continue") ||
+                     trimmed.startsWith("cycle ") || trimmed.startsWith("tablerow ") ||
+                     trimmed.startsWith("endtablerow") || trimmed.startsWith("increment ") ||
+                     trimmed.startsWith("decrement ") || trimmed.startsWith("render ") ||
+                     trimmed.startsWith("include ") || trimmed.startsWith("layout ") ||
+                     trimmed.startsWith("section ") || trimmed.startsWith("paginate ") ||
+                     trimmed.startsWith("endpaginate") || trimmed.startsWith("form ") ||
+                     trimmed.startsWith("endform") || trimmed.startsWith("style ") ||
+                     trimmed.startsWith("endstyle")) {
             converted += `{% ${trimmed} %}`;
           } else {
+            // Default: wrap as tag
             converted += `{% ${trimmed} %}`;
           }
         }
 
-        return await self.engine.parseAndRender(converted, scope.getAll());
+        try {
+          return await self.engine.parseAndRender(converted, scope.getAll());
+        } catch (error) {
+          console.error("[Liquid Tag] Parse error:", error);
+          return `<!-- Liquid tag error: ${error instanceof Error ? error.message : 'unknown'} -->`;
+        }
       },
     });
   }
