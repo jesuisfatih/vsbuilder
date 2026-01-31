@@ -7,9 +7,12 @@
  */
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import * as fs from "fs";
 import { ClientOnlyEditor } from "../components/ClientOnlyEditor";
 import { authenticate } from "../shopify.server";
-import { deleteThemeFolder, downloadThemeForEditor, isThemeSyncedProperly, saveThemeToLocal } from "../utils/theme.server";
+import { getMinimalEditorScript } from "../utils/editorBridge";
+import { createShopifyLiquidEngine } from "../utils/liquidEngine.server";
+import { deleteThemeFolder, downloadThemeForEditor, getLocalThemePath, isThemeSyncedProperly, saveThemeToLocal } from "../utils/theme.server";
 import { EditorCore } from "./app.editor";
 
 
@@ -120,6 +123,65 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       throw new Error("Theme data unavailable");
     }
 
+    // ======================================
+    // PRE-RENDER: Generate HTML server-side
+    // ======================================
+    let preRenderedHtml = "";
+    let renderError = null;
+
+    try {
+      console.log(`[Editor] Pre-rendering template: ${templateParam}`);
+      const themeDir = getLocalThemePath(shopHandle, themeIdParam);
+
+      if (fs.existsSync(themeDir)) {
+        const engine = createShopifyLiquidEngine(themeDir);
+        preRenderedHtml = await engine.renderPage(templateParam);
+
+        // Inject base styles
+        const baseStyles = `
+          <style>
+            *, *::before, *::after { box-sizing: border-box; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1a1a2e; margin: 0; padding: 0; }
+            img { max-width: 100%; height: auto; }
+            a { color: inherit; }
+            .shopify-section { padding: 20px 0; border-bottom: 1px solid #eee; }
+            .shopify-section:hover { outline: 2px dashed #5c5cf0; outline-offset: -2px; }
+            .grid { display: grid; gap: 20px; }
+            .page-width, .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+            h1, h2, h3 { margin-top: 0; line-height: 1.2; }
+          </style>
+        `;
+
+        // Inject editor script
+        const editorScript = getMinimalEditorScript();
+
+        // Rewrite asset URLs
+        const assetBaseUrl = `/apps/vsbuilder/assets?themeId=${themeIdParam}&shopHandle=${shopHandle}&file=`;
+        preRenderedHtml = preRenderedHtml.replace(/\/theme-assets\//g, assetBaseUrl);
+        preRenderedHtml = preRenderedHtml.replace(/\/theme-files\//g, assetBaseUrl);
+
+        // Inject styles and script
+        if (preRenderedHtml.includes("</head>")) {
+          preRenderedHtml = preRenderedHtml.replace("</head>", `${baseStyles}</head>`);
+        } else {
+          preRenderedHtml = baseStyles + preRenderedHtml;
+        }
+
+        if (preRenderedHtml.includes("</body>")) {
+          preRenderedHtml = preRenderedHtml.replace("</body>", `${editorScript}</body>`);
+        } else {
+          preRenderedHtml += editorScript;
+        }
+
+        console.log(`[Editor] Pre-render complete: ${preRenderedHtml.length} bytes`);
+      } else {
+        renderError = "Theme directory not found";
+      }
+    } catch (err) {
+      console.error("[Editor] Pre-render error:", err);
+      renderError = err instanceof Error ? err.message : "Unknown render error";
+    }
+
     const previewUrl = `/apps/vsbuilder/api/render-local?themeId=${themeData.theme.numericId}&template=${templateParam}`;
 
     return json({
@@ -147,6 +209,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         },
       },
       previewUrl,
+      preRenderedHtml,  // NEW: Pre-rendered HTML from server
+      renderError,      // NEW: Any render error
+      themeSynced: true, // NEW: Theme is definitely synced
       error: null,
     });
   } catch (error) {

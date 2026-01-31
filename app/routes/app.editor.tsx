@@ -4,46 +4,46 @@
  * Enterprise-grade architecture with full feature parity
  */
 import {
-  closestCenter,
-  DndContext,
-  DragOverlay,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
+    closestCenter,
+    DndContext,
+    DragOverlay,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+    type DragStartEvent,
 } from "@dnd-kit/core";
 import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  ArrowPathIcon,
-  ArrowTopRightOnSquareIcon,
-  ArrowUturnLeftIcon,
-  ArrowUturnRightIcon,
-  Bars2Icon,
-  CheckIcon,
-  ChevronDownIcon,
-  Cog6ToothIcon,
-  ComputerDesktopIcon,
-  DevicePhoneMobileIcon,
-  DocumentDuplicateIcon,
-  DocumentTextIcon,
-  EyeIcon,
-  EyeSlashIcon,
-  MagnifyingGlassIcon,
-  PhotoIcon,
-  PlusCircleIcon,
-  ShoppingBagIcon,
-  Square3Stack3DIcon,
-  Squares2X2Icon,
-  TrashIcon,
-  XMarkIcon
+    ArrowPathIcon,
+    ArrowTopRightOnSquareIcon,
+    ArrowUturnLeftIcon,
+    ArrowUturnRightIcon,
+    Bars2Icon,
+    CheckIcon,
+    ChevronDownIcon,
+    Cog6ToothIcon,
+    ComputerDesktopIcon,
+    DevicePhoneMobileIcon,
+    DocumentDuplicateIcon,
+    DocumentTextIcon,
+    EyeIcon,
+    EyeSlashIcon,
+    MagnifyingGlassIcon,
+    PhotoIcon,
+    PlusCircleIcon,
+    ShoppingBagIcon,
+    Square3Stack3DIcon,
+    Squares2X2Icon,
+    TrashIcon,
+    XMarkIcon
 } from "@heroicons/react/24/outline";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
@@ -51,20 +51,20 @@ import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getDefaultSettings,
-  SECTION_CATEGORIES,
-  SECTION_TEMPLATES,
+    getDefaultSettings,
+    SECTION_CATEGORIES,
+    SECTION_TEMPLATES,
 } from "../config/sectionTemplates";
 import {
-  THEME_SETTINGS_SCHEMA,
-  type ThemeSettingInput,
+    THEME_SETTINGS_SCHEMA,
+    type ThemeSettingInput,
 } from "../config/themeSettings";
 import { authenticate } from "../shopify.server";
 import {
-  useEditorStore,
-  type Block,
-  type GroupType,
-  type Section,
+    useEditorStore,
+    type Block,
+    type GroupType,
+    type Section,
 } from "../store/useEditorStore";
 import "../styles/editor.css";
 import { downloadThemeForEditor } from "../utils/theme.server";
@@ -1679,6 +1679,9 @@ interface EditorCoreProps {
       renderLocal: string;
       render: string;
     };
+    preRenderedHtml?: string;   // Pre-rendered HTML from server
+    renderError?: string | null; // Any render error
+    themeSynced?: boolean;       // Whether theme is synced on server
   };
   isProxyMode?: boolean;
 }
@@ -1714,7 +1717,7 @@ export function EditorCore({ loaderData, isProxyMode = false }: EditorCoreProps)
     );
   }
 
-  const { initialData, shop, themeId, themeName, themeRole, sourceThemeId, previewUrl, currentTemplate, availableTemplates, error, apiConfig } = loaderData;
+  const { initialData, shop, themeId, themeName, themeRole, sourceThemeId, previewUrl, currentTemplate, availableTemplates, error, apiConfig, preRenderedHtml, themeSynced: serverThemeSynced } = loaderData;
   const navigate = useNavigate();
   const fetcher = useFetcher();
   const renderFetcher = useFetcher();
@@ -1785,42 +1788,27 @@ export function EditorCore({ loaderData, isProxyMode = false }: EditorCoreProps)
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Initialize store
-  // Check if theme is synced locally and sync if needed
+  // Use pre-rendered HTML from server immediately (eliminates race conditions)
   useEffect(() => {
-    console.log('[Editor] API paths:', api);
+    console.log('[Editor] Using server pre-rendered HTML');
 
-    // Check sync status
-    fetch(`${api.syncCheck}?themeId=${themeId}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.synced) {
-          setThemeSynced(true);
-          // Load preview since theme is synced
-          previewFetcher.load(`${api.renderLocal}?themeId=${themeId}&template=${currentTemplate}`);
-        } else {
-          // Theme not synced, trigger sync
-          setSyncing(true);
-          syncFetcher.submit(
-            { themeId },
-            { method: "POST", action: api.syncAction }
-          );
-        }
-      })
-      .catch(err => {
-        console.error("Sync check error:", err);
-      });
-  }, [themeId]);
-
-  // Handle sync completion
-  useEffect(() => {
-    if (syncFetcher.data && (syncFetcher.data as any).success) {
+    // Theme is already synced on server, set state immediately
+    if (serverThemeSynced) {
       setThemeSynced(true);
-      setSyncing(false);
-      // Now load the preview
-      previewFetcher.load(`${api.renderLocal}?themeId=${themeId}&template=${currentTemplate}`);
     }
-  }, [syncFetcher.data]);
+
+    // If we have pre-rendered HTML, inject it directly
+    if (preRenderedHtml && iframeRef.current) {
+      const doc = iframeRef.current.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(preRenderedHtml);
+        doc.close();
+        setIframeReady(true);
+        console.log('[Editor] Pre-rendered HTML injected from server');
+      }
+    }
+  }, [themeId, preRenderedHtml, serverThemeSynced]);
 
   // Initialize store
   useEffect(() => {
@@ -1833,9 +1821,12 @@ export function EditorCore({ loaderData, isProxyMode = false }: EditorCoreProps)
     store.setPreviewUrl(`https://${shop}/?preview_theme_id=${themeId}`);
   }, [themeId, currentTemplate]); // Refetch when template changes
 
-  // Inject Preview HTML
+  // FALLBACK: Inject Preview HTML from dynamic fetch (only used when re-rendering sections)
   useEffect(() => {
-    if (previewFetcher.data && !iframeReady && iframeRef.current) {
+    // Skip if we already have iframe ready from pre-render
+    if (iframeReady) return;
+
+    if (previewFetcher.data && iframeRef.current) {
         const content = typeof previewFetcher.data === 'string' ? previewFetcher.data : (previewFetcher.data as any).html || "";
 
         if (!content) return;
@@ -1848,7 +1839,7 @@ export function EditorCore({ loaderData, isProxyMode = false }: EditorCoreProps)
             setIframeReady(true);
         }
     }
-  }, [previewFetcher.data, iframeReady]);
+  }, [previewFetcher.data]);
 
   // Section Rendering Logic
   useEffect(() => {
