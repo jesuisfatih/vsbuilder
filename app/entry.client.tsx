@@ -1,13 +1,13 @@
 /**
  * Entry Client
  *
- * Proxy mode'da hydration yerine fresh render yapıyoruz.
- * Ve route ID uyuşmazlığını context patching ile çözüyoruz.
+ * Proxy mode'da Remix routing'i bypass edip doğrudan EditorCore render ediyoruz.
+ * Bu, hydration hatalarını tamamen ortadan kaldırır.
  */
 
 import { RemixBrowser } from "@remix-run/react";
 import { startTransition, StrictMode } from "react";
-import { hydrateRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 
 // Check if we're in proxy mode (accessed via Shopify storefront)
 const isProxyMode = typeof window !== 'undefined' && (
@@ -17,80 +17,88 @@ const isProxyMode = typeof window !== 'undefined' && (
   !window.location.hostname.includes('vsbuilder.techifyboost.com')
 );
 
-console.log('[entry.client] Mode:', isProxyMode ? 'PROXY (fresh render)' : 'ADMIN (hydration)');
+console.log('[entry.client] Mode:', isProxyMode ? 'PROXY' : 'ADMIN');
 console.log('[entry.client] URL:', window.location.href);
 
 if (isProxyMode) {
-  // PATCH: Route ID Mismatch Fix
+  // PROXY MODE: Extract data and render EditorCore directly
+  // This completely bypasses Remix routing to avoid hydration issues
+
   const context = (window as any).__remixContext;
+  let loaderData = null;
+
   if (context) {
-    console.log('[entry.client] Patching Remix Context for Proxy Mode');
-
+    // Try to find loader data from various possible locations
     const serverRouteId = "routes/proxy.editor";
-    const clientRouteId = "routes/apps.vsbuilder.editor";
 
-    // Update matches
-    const matches = context.matches || context.state?.matches;
-    if (matches) {
-      matches.forEach((m: any) => {
-        if (m.route && m.route.id === serverRouteId) {
-          console.log(`[entry.client] Patching match ID: ${serverRouteId} -> ${clientRouteId}`);
-          m.route.id = clientRouteId;
-        }
-      });
+    if (context.loaderData?.[serverRouteId]) {
+      loaderData = context.loaderData[serverRouteId];
+    } else if (context.state?.loaderData?.[serverRouteId]) {
+      loaderData = context.state.loaderData[serverRouteId];
     }
 
-    // Capture data directly from source
-    let foundData = null;
-
-    // Check root loaderData
-    if (context.loaderData && context.loaderData[serverRouteId]) {
-      foundData = context.loaderData[serverRouteId];
-      context.loaderData[clientRouteId] = foundData;
-      console.log(`[entry.client] Patched root loaderData`);
-    }
-
-    // Check state loaderData
-    if (context.state?.loaderData && context.state.loaderData[serverRouteId]) {
-      foundData = context.state.loaderData[serverRouteId];
-      context.state.loaderData[clientRouteId] = foundData;
-      console.log(`[entry.client] Patched state loaderData`);
-    }
-
-    // Store globally for failsafe access
-    if (foundData) {
-      console.log('[entry.client] Saving data to global __VSBUILDER_DATA');
-      (window as any).__VSBUILDER_DATA = foundData;
+    if (loaderData) {
+      console.log('[entry.client] Found loader data');
+      (window as any).__VSBUILDER_DATA = loaderData;
     } else {
-      console.warn('[entry.client] Could not find any data to patch!');
+      console.warn('[entry.client] Could not find loader data!');
     }
   }
 
-  // Use hydrateRoot but suppress hydration mismatch errors
-  // This is necessary because server renders with proxy.editor route
-  // but client expects apps.vsbuilder.editor route
-  startTransition(() => {
-    hydrateRoot(
-      document,
-      <StrictMode>
-        <RemixBrowser />
-      </StrictMode>,
-      {
-        onRecoverableError: (error: unknown) => {
-          // Silently ignore hydration mismatch errors in proxy mode
-          // These are expected due to route ID differences
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          if (errorMessage.includes('Hydration') || errorMessage.includes('hydrat')) {
-            console.debug('[Hydration] Suppressed error:', errorMessage.substring(0, 100));
-          } else {
-            console.error('[React] Error:', error);
-          }
-        }
-      }
-    );
+  // Dynamic import to avoid bundling issues
+  import('./routes/app.editor').then(({ EditorCore }) => {
+    // Clear the entire document and start fresh
+    document.open();
+    document.write(`
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>VSBuilder Editor</title>
+          <link rel="stylesheet" href="/styles.css">
+          <link rel="stylesheet" href="/tailwind.css">
+        </head>
+        <body>
+          <div id="vsbuilder-root"></div>
+        </body>
+      </html>
+    `);
+    document.close();
+
+    const data = (window as any).__VSBUILDER_DATA || loaderData;
+
+    if (!data) {
+      document.getElementById('vsbuilder-root')!.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: #1a1a2e; color: white; font-family: system-ui;">
+          <div style="text-align: center;">
+            <h1 style="font-size: 24px; margin-bottom: 16px;">Error Loading Editor</h1>
+            <p style="color: #94a3b8;">Could not load editor data. Please try again.</p>
+            <button onclick="window.location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #3b82f6; border: none; border-radius: 4px; color: white; cursor: pointer;">
+              Reload
+            </button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    console.log('[entry.client] Rendering EditorCore directly');
+
+    startTransition(() => {
+      createRoot(document.getElementById('vsbuilder-root')!).render(
+        <StrictMode>
+          <EditorCore loaderData={data} isProxyMode={true} />
+        </StrictMode>
+      );
+    });
+  }).catch(err => {
+    console.error('[entry.client] Failed to load EditorCore:', err);
+    document.body.innerHTML = `<div style="padding: 40px; color: red;">Failed to load editor: ${err.message}</div>`;
   });
+
 } else {
-  // Normal hydration for admin routes
+  // ADMIN MODE: Normal Remix hydration
   startTransition(() => {
     hydrateRoot(
       document,
