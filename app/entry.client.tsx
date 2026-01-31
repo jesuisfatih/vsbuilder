@@ -1,13 +1,13 @@
 /**
  * Entry Client
  *
- * Proxy mode'da Remix routing'i bypass edip doğrudan EditorCore render ediyoruz.
- * Bu, hydration hatalarını tamamen ortadan kaldırır.
+ * Proxy mode: SSR HTML'ini koruyup hydration hatalarını tolere ediyoruz.
+ * Admin mode: Normal Remix hydration.
  */
 
 import { RemixBrowser } from "@remix-run/react";
 import { startTransition, StrictMode } from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
+import { hydrateRoot } from "react-dom/client";
 
 // Check if we're in proxy mode (accessed via Shopify storefront)
 const isProxyMode = typeof window !== 'undefined' && (
@@ -21,81 +21,89 @@ console.log('[entry.client] Mode:', isProxyMode ? 'PROXY' : 'ADMIN');
 console.log('[entry.client] URL:', window.location.href);
 
 if (isProxyMode) {
-  // PROXY MODE: Extract data and render EditorCore directly
-  // This completely bypasses Remix routing to avoid hydration issues
+  // PROXY MODE: Patch context and hydrate with error suppression
 
   const context = (window as any).__remixContext;
-  let loaderData = null;
-
   if (context) {
-    // Try to find loader data from various possible locations
-    const serverRouteId = "routes/proxy.editor";
+    console.log('[entry.client] Patching Remix Context for Proxy Mode');
 
-    if (context.loaderData?.[serverRouteId]) {
-      loaderData = context.loaderData[serverRouteId];
-    } else if (context.state?.loaderData?.[serverRouteId]) {
-      loaderData = context.state.loaderData[serverRouteId];
+    const serverRouteId = "routes/proxy.editor";
+    const clientRouteId = "routes/apps.vsbuilder.editor";
+
+    // Patch ALL route references
+    const patchRoutes = (obj: any, path = '') => {
+      if (!obj || typeof obj !== 'object') return;
+
+      for (const key of Object.keys(obj)) {
+        if (obj[key] === serverRouteId) {
+          obj[key] = clientRouteId;
+          console.log(`[entry.client] Patched ${path}.${key}`);
+        } else if (typeof obj[key] === 'object') {
+          patchRoutes(obj[key], `${path}.${key}`);
+        }
+      }
+    };
+
+    // Patch matches array
+    if (context.state?.matches) {
+      context.state.matches.forEach((m: any, i: number) => {
+        if (m.route?.id === serverRouteId) {
+          m.route.id = clientRouteId;
+          console.log(`[entry.client] Patched match[${i}].route.id`);
+        }
+      });
     }
 
-    if (loaderData) {
-      console.log('[entry.client] Found loader data');
-      (window as any).__VSBUILDER_DATA = loaderData;
-    } else {
-      console.warn('[entry.client] Could not find loader data!');
+    // Capture and duplicate loader data
+    let foundData = null;
+
+    if (context.state?.loaderData?.[serverRouteId]) {
+      foundData = context.state.loaderData[serverRouteId];
+      context.state.loaderData[clientRouteId] = foundData;
+      console.log('[entry.client] Copied loaderData to client route ID');
+    }
+
+    if (foundData) {
+      (window as any).__VSBUILDER_DATA = foundData;
     }
   }
 
-  // Dynamic import to avoid bundling issues
-  import('./routes/app.editor').then(({ EditorCore }) => {
-    // Clear the entire document and start fresh
-    document.open();
-    document.write(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>VSBuilder Editor</title>
-          <link rel="stylesheet" href="/styles.css">
-          <link rel="stylesheet" href="/tailwind.css">
-        </head>
-        <body>
-          <div id="vsbuilder-root"></div>
-        </body>
-      </html>
-    `);
-    document.close();
-
-    const data = (window as any).__VSBUILDER_DATA || loaderData;
-
-    if (!data) {
-      document.getElementById('vsbuilder-root')!.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: #1a1a2e; color: white; font-family: system-ui;">
-          <div style="text-align: center;">
-            <h1 style="font-size: 24px; margin-bottom: 16px;">Error Loading Editor</h1>
-            <p style="color: #94a3b8;">Could not load editor data. Please try again.</p>
-            <button onclick="window.location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #3b82f6; border: none; border-radius: 4px; color: white; cursor: pointer;">
-              Reload
-            </button>
-          </div>
-        </div>
-      `;
+  // CRITICAL: Suppress ALL errors during hydration
+  // React 18 is more strict about hydration, but we can't avoid mismatches
+  // due to route ID differences
+  const originalError = console.error;
+  console.error = (...args) => {
+    const msg = args[0]?.toString() || '';
+    // Suppress hydration and React error messages
+    if (msg.includes('Hydration') ||
+        msg.includes('hydrat') ||
+        msg.includes('did not match') ||
+        msg.includes('server rendered') ||
+        msg.includes('Minified React error')) {
+      console.debug('[Suppressed]', msg.substring(0, 100));
       return;
     }
+    originalError.apply(console, args);
+  };
 
-    console.log('[entry.client] Rendering EditorCore directly');
-
-    startTransition(() => {
-      createRoot(document.getElementById('vsbuilder-root')!).render(
-        <StrictMode>
-          <EditorCore loaderData={data} isProxyMode={true} />
-        </StrictMode>
-      );
-    });
-  }).catch(err => {
-    console.error('[entry.client] Failed to load EditorCore:', err);
-    document.body.innerHTML = `<div style="padding: 40px; color: red;">Failed to load editor: ${err.message}</div>`;
+  startTransition(() => {
+    hydrateRoot(
+      document,
+      <StrictMode>
+        <RemixBrowser />
+      </StrictMode>,
+      {
+        onRecoverableError: () => {
+          // Silently ignore ALL recoverable errors in proxy mode
+        }
+      }
+    );
   });
+
+  // Restore console.error after hydration settles
+  setTimeout(() => {
+    console.error = originalError;
+  }, 5000);
 
 } else {
   // ADMIN MODE: Normal Remix hydration
