@@ -66,9 +66,14 @@ if (isProxyMode) {
     }
   }
 
-  // Pure Client Render
+  // Pure Client Render - Clear body and render fresh
+  // Note: createRoot requires a DOM element, not document
   startTransition(() => {
-    createRoot(document).render(
+    // Clear any SSR content to avoid hydration mismatch
+    document.body.innerHTML = '<div id="app"></div>';
+    const container = document.getElementById('app')!;
+
+    createRoot(container).render(
       <StrictMode>
         <RemixBrowser />
       </StrictMode>
