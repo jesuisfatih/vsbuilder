@@ -24,20 +24,29 @@ export async function clientLoader({ request, params }: ClientLoaderFunctionArgs
   if (typeof window !== 'undefined') {
     const context = (window as any).__remixContext;
 
-    // 1. Zaten patchlenmiş veriyi kontrol et
-    if (context?.loaderData?.["routes/apps.vsbuilder.editor"]) {
+    // Helper to find data in various possible context structures
+    const findData = (key: string) => {
+      // 1. Direct on context (some versions)
+      if (context?.loaderData?.[key]) return context.loaderData[key];
+      // 2. Inside state (most versions)
+      if (context?.state?.loaderData?.[key]) return context.state.loaderData[key];
+      return null;
+    };
+
+    const patchedData = findData("routes/apps.vsbuilder.editor");
+    if (patchedData) {
       console.log('[apps.vsbuilder.editor] Found patched data');
-      return context.loaderData["routes/apps.vsbuilder.editor"];
+      return patchedData;
     }
 
-    // 2. Orijinal proxy.editor verisini kontrol et
-    if (context?.loaderData?.["routes/proxy.editor"]) {
+    const originalData = findData("routes/proxy.editor");
+    if (originalData) {
       console.log('[apps.vsbuilder.editor] Found proxy.editor data, using it');
-      return context.loaderData["routes/proxy.editor"];
+      return originalData;
     }
   }
 
-  console.warn('[apps.vsbuilder.editor] No data found in context');
+  console.warn('[apps.vsbuilder.editor] No data found in context', (window as any).__remixContext);
   return null;
 }
 

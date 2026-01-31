@@ -29,19 +29,15 @@ if (isProxyMode) {
   if (context) {
     console.log('[entry.client] Patching Remix Context for Proxy Mode');
 
-    // 1. Find the server route match using the file path convention
     // Server ID is usually "routes/proxy.editor"
     const serverRouteId = "routes/proxy.editor";
     const clientRouteId = "routes/apps.vsbuilder.editor";
 
-    // 2. If we have data for the server route, alias it to the client route
-    if (context.routeModules && context.routeModules[serverRouteId]) {
-      // Note: routeModules are usually dynamically loaded, but manifests strictly map IDs
-    }
-
-    // 3. Update matches to point to the client route ID
-    if (context.matches) {
-      context.matches.forEach((m: any) => {
+    // Update matches to point to the client route ID
+    // Matches might be in context.state.matches or context.matches
+    const matches = context.matches || context.state?.matches;
+    if (matches) {
+      matches.forEach((m: any) => {
         if (m.route && m.route.id === serverRouteId) {
           console.log(`[entry.client] Patching match ID: ${serverRouteId} -> ${clientRouteId}`);
           m.route.id = clientRouteId;
@@ -49,17 +45,17 @@ if (isProxyMode) {
       });
     }
 
-    // 4. Also patch the loaderData key using the client ID
+    // Patch loaderData
+    // Might be in context.loaderData or context.state.loaderData
     if (context.loaderData && context.loaderData[serverRouteId]) {
-      console.log(`[entry.client] Patching loaderData: ${serverRouteId} -> ${clientRouteId}`);
+      console.log(`[entry.client] Patching loaderData (root): ${serverRouteId} -> ${clientRouteId}`);
       context.loaderData[clientRouteId] = context.loaderData[serverRouteId];
-      // Keep serverRouteId data just in case? Or delete? Keep it.
     }
 
-    // 5. IMPORTANT: Make sure the manifest knows about the aliasing if needed
-    // But Remix uses window.__remixManifest for route definitions.
-    // The "routes/apps.vsbuilder.editor" needs to exist in the manifest!
-    // Since we created the file, it SHOULD exist.
+    if (context.state?.loaderData && context.state.loaderData[serverRouteId]) {
+      console.log(`[entry.client] Patching loaderData (state): ${serverRouteId} -> ${clientRouteId}`);
+      context.state.loaderData[clientRouteId] = context.state.loaderData[serverRouteId];
+    }
   }
 
   // Pure Client Render

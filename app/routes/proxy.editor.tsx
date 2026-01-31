@@ -164,6 +164,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function ProxyEditor() {
   const data = useLoaderData<typeof loader>();
 
+  // If data is null (clientLoader failed to find data)
+  if (!data) {
+    return (
+      <div style={{
+        padding: '40px',
+        textAlign: 'center',
+        fontFamily: 'system-ui, sans-serif',
+        color: '#fff',
+        background: '#1a1a2e',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <h2 style={{ marginBottom: '16px' }}>Initializing Editor...</h2>
+        <p style={{ color: '#94a3b8' }}>Please wait while we connect to the server.</p>
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            marginTop: '20px',
+            padding: '10px 20px',
+            background: '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer'
+          }}
+        >
+          Reload Page
+        </button>
+      </div>
+    );
+  }
+
   return (
     <ClientOnlyEditor>
       <EditorCore
