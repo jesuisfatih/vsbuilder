@@ -29,10 +29,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // API endpoints configuration - RELATIVE URLs for proxy mode (avoid CORS)
   // Request goes to Shopify -> Shopify proxies to Backend
   const apiConfig = {
-    syncCheck: `/apps/vsbuilder/api.sync`,
-    syncAction: `/apps/vsbuilder/api.sync`,
-    renderLocal: `/apps/vsbuilder/api.render-local`,
-    render: `/apps/vsbuilder/api.render`,
+    syncCheck: `/apps/vsbuilder/api/sync`,
+    syncAction: `/apps/vsbuilder/api/sync`,
+    renderLocal: `/apps/vsbuilder/api/render-local`,
+    render: `/apps/vsbuilder/api/render`,
   };
 
   try {
