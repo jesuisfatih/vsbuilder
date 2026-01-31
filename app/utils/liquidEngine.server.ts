@@ -65,6 +65,7 @@ export interface RenderContext {
     path: string;
     host: string;
     locale?: { iso_code: string };
+    design_mode?: boolean;
   };
   settings: Record<string, any>;
   localization: {
@@ -1881,6 +1882,10 @@ export class ShopifyLiquidEngine {
 
   private getDefaultContext(): RenderContext & Record<string, any> {
     const settings = this.loadThemeSettings();
+    const mockProducts = this.getMockProducts();
+    const mockCollections = this.getMockCollections();
+    const mockMenus = this.getMockMenus();
+
     return {
       shop: {
         name: "My Store",
@@ -1888,7 +1893,7 @@ export class ShopifyLiquidEngine {
         currency: "USD",
         locale: "en",
         money_format: "${{amount}}",
-        enabled_payment_types: [],
+        enabled_payment_types: ["visa", "mastercard", "amex", "paypal"],
       },
       page_title: "Home",
       content_for_header: "",
@@ -1898,36 +1903,417 @@ export class ShopifyLiquidEngine {
         path: "/",
         host: "mystore.myshopify.com",
         locale: { iso_code: "en" },
+        design_mode: true, // Indicates we're in the editor
       },
       settings,
       localization: {
         available_languages: [{ iso_code: "en", name: "English" }],
         language: { iso_code: "en", name: "English" },
       },
-      // Global objects (mock data)
-      product: null,
-      collection: null,
-      collections: [],
-      cart: { item_count: 0, items: [], total_price: 0 },
+      // Global objects with mock data
+      product: mockProducts[0],
+      products: mockProducts,
+      collection: mockCollections[0],
+      collections: mockCollections,
+      all_products: this.arrayToHandle(mockProducts),
+      cart: {
+        item_count: 2,
+        items: [
+          { product: mockProducts[0], quantity: 1, line_price: 1999 },
+          { product: mockProducts[1], quantity: 1, line_price: 2499 }
+        ],
+        total_price: 4498,
+        currency: { iso_code: "USD" }
+      },
       customer: null,
-      all_products: {},
-      pages: [],
-      blogs: [],
+      pages: [
+        { title: "About Us", handle: "about-us", url: "/pages/about-us" },
+        { title: "Contact", handle: "contact", url: "/pages/contact" },
+      ],
+      blogs: [
+        { title: "News", handle: "news", url: "/blogs/news" },
+      ],
       articles: [],
-      linklists: {},
-      routes: { root_url: "/", cart_url: "/cart", account_url: "/account" },
+      linklists: mockMenus,
+      menus: mockMenus,
+      routes: {
+        root_url: "/",
+        cart_url: "/cart",
+        account_url: "/account",
+        account_login_url: "/account/login",
+        account_register_url: "/account/register",
+        search_url: "/search",
+        collections_url: "/collections",
+        all_products_collection_url: "/collections/all",
+      },
       canonical_url: "/",
-      page_description: "",
-      handle: "",
+      page_description: "Welcome to our store",
+      handle: "index",
+      // Images global
+      images: {
+        logo: { src: "https://via.placeholder.com/200x60?text=Logo" },
+        placeholder: { src: "https://via.placeholder.com/400x400?text=Image" },
+      },
+      // Powered by URL
+      powered_by_link: '<a href="https://www.shopify.com" target="_blank">Powered by Shopify</a>',
     };
   }
 
+  private getMockProducts(): any[] {
+    const placeholderImg = "https://via.placeholder.com/400x400?text=Product";
+    return [
+      {
+        id: 1001,
+        title: "Sample Product 1",
+        handle: "sample-product-1",
+        url: "/products/sample-product-1",
+        price: 1999,
+        price_min: 1999,
+        price_max: 2499,
+        compare_at_price: 2499,
+        compare_at_price_min: 2499,
+        compare_at_price_max: 2499,
+        available: true,
+        featured_image: { src: placeholderImg, alt: "Sample Product 1" },
+        images: [{ src: placeholderImg, alt: "Sample Product 1" }],
+        image: { src: placeholderImg, alt: "Sample Product 1" },
+        variants: [
+          { id: 1, title: "Default", price: 1999, available: true, inventory_quantity: 10 }
+        ],
+        selected_or_first_available_variant: { id: 1, title: "Default", price: 1999, available: true },
+        description: "This is a sample product for preview purposes.",
+        vendor: "Sample Vendor",
+        type: "Sample Type",
+        tags: ["sample", "preview"],
+        options: [],
+        has_only_default_variant: true,
+      },
+      {
+        id: 1002,
+        title: "Sample Product 2",
+        handle: "sample-product-2",
+        url: "/products/sample-product-2",
+        price: 2499,
+        price_min: 2499,
+        price_max: 2499,
+        compare_at_price: 3499,
+        compare_at_price_min: 3499,
+        available: true,
+        featured_image: { src: placeholderImg, alt: "Sample Product 2" },
+        images: [{ src: placeholderImg, alt: "Sample Product 2" }],
+        image: { src: placeholderImg, alt: "Sample Product 2" },
+        variants: [
+          { id: 2, title: "Default", price: 2499, available: true, inventory_quantity: 5 }
+        ],
+        selected_or_first_available_variant: { id: 2, title: "Default", price: 2499, available: true },
+        description: "Another sample product.",
+        vendor: "Sample Vendor",
+        type: "Sample Type",
+        tags: ["sample"],
+        options: [],
+        has_only_default_variant: true,
+      },
+      {
+        id: 1003,
+        title: "Sample Product 3",
+        handle: "sample-product-3",
+        url: "/products/sample-product-3",
+        price: 3999,
+        price_min: 3999,
+        price_max: 3999,
+        compare_at_price: null,
+        available: true,
+        featured_image: { src: placeholderImg, alt: "Sample Product 3" },
+        images: [{ src: placeholderImg, alt: "Sample Product 3" }],
+        image: { src: placeholderImg, alt: "Sample Product 3" },
+        variants: [
+          { id: 3, title: "Default", price: 3999, available: true, inventory_quantity: 15 }
+        ],
+        selected_or_first_available_variant: { id: 3, title: "Default", price: 3999, available: true },
+        description: "Premium sample product.",
+        vendor: "Premium Vendor",
+        type: "Premium Type",
+        tags: ["premium"],
+        options: [],
+        has_only_default_variant: true,
+      },
+      {
+        id: 1004,
+        title: "Sample Product 4",
+        handle: "sample-product-4",
+        url: "/products/sample-product-4",
+        price: 4999,
+        price_min: 4999,
+        price_max: 4999,
+        compare_at_price: 5999,
+        available: false,
+        featured_image: { src: placeholderImg, alt: "Sample Product 4" },
+        images: [{ src: placeholderImg, alt: "Sample Product 4" }],
+        image: { src: placeholderImg, alt: "Sample Product 4" },
+        variants: [
+          { id: 4, title: "Default", price: 4999, available: false, inventory_quantity: 0 }
+        ],
+        selected_or_first_available_variant: { id: 4, title: "Default", price: 4999, available: false },
+        description: "Out of stock sample.",
+        vendor: "Sample Vendor",
+        type: "Sample Type",
+        tags: ["sold-out"],
+        options: [],
+        has_only_default_variant: true,
+      },
+    ];
+  }
+
+  private getMockCollections(): any[] {
+    const placeholderImg = "https://via.placeholder.com/600x400?text=Collection";
+    const products = this.getMockProducts();
+
+    return [
+      {
+        id: 2001,
+        title: "All Products",
+        handle: "all",
+        url: "/collections/all",
+        description: "Browse all our products",
+        image: { src: placeholderImg, alt: "All Products" },
+        featured_image: { src: placeholderImg, alt: "All Products" },
+        products: products,
+        products_count: products.length,
+        all_products_count: products.length,
+      },
+      {
+        id: 2002,
+        title: "Featured",
+        handle: "featured",
+        url: "/collections/featured",
+        description: "Our featured products",
+        image: { src: placeholderImg, alt: "Featured" },
+        featured_image: { src: placeholderImg, alt: "Featured" },
+        products: products.slice(0, 2),
+        products_count: 2,
+        all_products_count: 2,
+      },
+      {
+        id: 2003,
+        title: "New Arrivals",
+        handle: "new-arrivals",
+        url: "/collections/new-arrivals",
+        description: "Check out our latest products",
+        image: { src: placeholderImg, alt: "New Arrivals" },
+        featured_image: { src: placeholderImg, alt: "New Arrivals" },
+        products: products.slice(1, 3),
+        products_count: 2,
+        all_products_count: 2,
+      },
+    ];
+  }
+
+  private getMockMenus(): Record<string, any> {
+    return {
+      "main-menu": {
+        title: "Main Menu",
+        handle: "main-menu",
+        links: [
+          { title: "Home", url: "/", active: true },
+          { title: "Catalog", url: "/collections/all", active: false },
+          { title: "About Us", url: "/pages/about-us", active: false },
+          { title: "Contact", url: "/pages/contact", active: false },
+        ],
+      },
+      "footer-menu": {
+        title: "Footer Menu",
+        handle: "footer-menu",
+        links: [
+          { title: "Search", url: "/search", active: false },
+          { title: "Privacy Policy", url: "/policies/privacy-policy", active: false },
+          { title: "Refund Policy", url: "/policies/refund-policy", active: false },
+        ],
+      },
+    };
+  }
+
+  private arrayToHandle(items: any[]): Record<string, any> {
+    const result: Record<string, any> = {};
+    for (const item of items) {
+      if (item.handle) {
+        result[item.handle] = item;
+      }
+    }
+    return result;
+  }
+
   private getContentForHeader(context: RenderContext): string {
+    // Generate CSS variables from theme settings
+    const cssVariables = this.generateCSSVariables(context.settings || {});
+
+    // Get CSS files from assets directory
+    const cssLinks = this.getAssetCSSLinks();
+
+    // Common Google Fonts (can be extended based on theme settings)
+    const googleFonts = this.getGoogleFontsLink(context.settings || {});
+
     return `
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>${context.page_title} - ${context.shop.name}</title>
+      ${googleFonts}
+      <style>
+        :root {
+          ${cssVariables}
+          /* Fallback colors */
+          --color-base-text: #1a1a2e;
+          --color-base-background-1: #ffffff;
+          --color-base-background-2: #f5f5f5;
+          --color-base-accent-1: #5c5cf0;
+          --color-base-accent-2: #4a4ad9;
+          --gradient-base-background-1: #ffffff;
+          --font-body-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          --font-heading-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          --font-body-scale: 1;
+          --font-heading-scale: 1;
+          --buttons-radius: 4px;
+          --inputs-radius: 4px;
+          --page-width: 1200px;
+          --media-padding: 16px;
+        }
+        /* Base reset */
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+          font-family: var(--font-body-family);
+          font-size: calc(var(--font-body-scale) * 1rem);
+          line-height: 1.6;
+          color: var(--color-base-text);
+          background: var(--color-base-background-1);
+          margin: 0;
+        }
+        img, svg { max-width: 100%; height: auto; display: block; }
+        a { color: var(--color-base-accent-1); }
+        .page-width { max-width: var(--page-width); margin: 0 auto; padding: 0 var(--media-padding); }
+        .button, .shopify-challenge__button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 12px 28px;
+          background: var(--color-base-accent-1);
+          color: white;
+          text-decoration: none;
+          border-radius: var(--buttons-radius);
+          border: none;
+          cursor: pointer;
+          font-weight: 600;
+        }
+        .button:hover { background: var(--color-base-accent-2); }
+        h1, h2, h3, h4, h5, h6 {
+          font-family: var(--font-heading-family);
+          margin-top: 0;
+          line-height: 1.2;
+        }
+        .grid { display: grid; gap: 1rem; }
+        .grid--2-col-desktop { grid-template-columns: repeat(2, 1fr); }
+        .grid--3-col-desktop { grid-template-columns: repeat(3, 1fr); }
+        .grid--4-col-desktop { grid-template-columns: repeat(4, 1fr); }
+        @media (max-width: 749px) {
+          .grid--2-col-desktop, .grid--3-col-desktop, .grid--4-col-desktop {
+            grid-template-columns: 1fr;
+          }
+        }
+        /* Section hover effect for editor */
+        .shopify-section { transition: outline 0.2s; }
+        .shopify-section:hover { outline: 2px dashed var(--color-base-accent-1); outline-offset: -2px; }
+        /* Hide schema tags */
+        script[type="application/json"] { display: none; }
+      </style>
+      ${cssLinks}
     `;
+  }
+
+  private generateCSSVariables(settings: Record<string, any>): string {
+    const vars: string[] = [];
+
+    for (const [key, value] of Object.entries(settings)) {
+      if (value === null || value === undefined) continue;
+
+      // Color settings
+      if (typeof value === 'string') {
+        if (value.startsWith('#') || value.startsWith('rgb') || value.startsWith('hsl')) {
+          vars.push(`--color-${key.replace(/_/g, '-')}: ${value};`);
+        }
+      }
+
+      // Color objects from Shopify (e.g., {red: 255, green: 0, blue: 0, alpha: 1})
+      if (typeof value === 'object' && value.red !== undefined) {
+        const rgba = `rgba(${value.red}, ${value.green}, ${value.blue}, ${value.alpha ?? 1})`;
+        vars.push(`--color-${key.replace(/_/g, '-')}: ${rgba};`);
+      }
+
+      // Font settings
+      if (key.includes('font') && typeof value === 'string') {
+        vars.push(`--font-${key.replace(/_/g, '-')}: ${value};`);
+      }
+
+      // Numeric settings (spacing, etc)
+      if (typeof value === 'number') {
+        vars.push(`--${key.replace(/_/g, '-')}: ${value}px;`);
+      }
+    }
+
+    return vars.join('\n          ');
+  }
+
+  private getAssetCSSLinks(): string {
+    const assetsDir = path.join(this.themeDir, "assets");
+    if (!fs.existsSync(assetsDir)) return '';
+
+    try {
+      const files = fs.readdirSync(assetsDir);
+      const cssFiles = files.filter(f => f.endsWith('.css') && !f.includes('.liquid'));
+
+      // Prioritize base/component CSS files
+      const priority = ['base.css', 'component-', 'section-', 'template-'];
+      cssFiles.sort((a, b) => {
+        const aPriority = priority.findIndex(p => a.includes(p));
+        const bPriority = priority.findIndex(p => b.includes(p));
+        return (aPriority === -1 ? 999 : aPriority) - (bPriority === -1 ? 999 : bPriority);
+      });
+
+      // Only load main CSS files (not minified duplicates)
+      const mainCssFiles = cssFiles.filter(f => !f.includes('.aio.min.'));
+
+      return mainCssFiles.map(f =>
+        `<link rel="stylesheet" href="/theme-assets/${f}">`
+      ).join('\n      ');
+    } catch (e) {
+      console.error("Failed to read assets directory:", e);
+      return '';
+    }
+  }
+
+  private getGoogleFontsLink(settings: Record<string, any>): string {
+    // Extract font families from settings
+    const fonts: Set<string> = new Set();
+
+    for (const [key, value] of Object.entries(settings)) {
+      if (key.includes('font') && typeof value === 'string') {
+        // Parse Shopify font format (e.g., "roboto_n4" or "Roboto")
+        const fontName = value.split('_')[0].replace(/([A-Z])/g, ' $1').trim();
+        if (fontName && fontName.length > 0) {
+          fonts.add(fontName);
+        }
+      }
+    }
+
+    // Default fonts if none specified
+    if (fonts.size === 0) {
+      fonts.add('Inter');
+    }
+
+    const fontFamilies = Array.from(fonts)
+      .map(f => f.replace(/ /g, '+'))
+      .join('|');
+
+    return `<link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=${fontFamilies}:wght@400;500;600;700&display=swap" rel="stylesheet">`;
   }
 
   private loadThemeSettings(): Record<string, any> {
