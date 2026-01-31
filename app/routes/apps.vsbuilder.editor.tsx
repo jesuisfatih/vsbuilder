@@ -12,6 +12,7 @@ import { authenticate } from "../shopify.server";
 import { downloadThemeForEditor } from "../utils/theme.server";
 import { EditorCore } from "./app.editor";
 
+
 // Available template types
 const TEMPLATE_TYPES = [
   { value: "index", label: "Home Page", path: "templates/index.json" },
@@ -92,7 +93,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     console.log(`[Editor] Loading for Shop: ${session.shop}, Theme: ${themeIdParam}`);
 
-    // Download theme data
+    const shopHandle = session.shop.replace(".myshopify.com", "");
+
+    // Check if theme is synced locally, if not sync it first
+    const isLocallyAvailable = isThemeSavedLocally(shopHandle, themeIdParam);
+    if (!isLocallyAvailable) {
+      console.log(`[Editor] Theme not found locally, syncing...`);
+      const syncResult = await saveThemeToLocal(admin, themeIdParam, shopHandle);
+      if (syncResult) {
+        console.log(`[Editor] Theme synced successfully!`);
+      } else {
+        console.error(`[Editor] Theme sync failed!`);
+      }
+    } else {
+      console.log(`[Editor] Theme already synced locally`);
+    }
+
+    // Download theme data (structure, templates, etc.)
     const themeData = await downloadThemeForEditor(admin, themeIdParam, templateParam);
 
     if (!themeData) {
