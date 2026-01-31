@@ -52,6 +52,52 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       html = await engine.renderPage(template);
     }
 
+    // Inject base styles for preview (fallback when theme CSS fails)
+    const baseStyles = `
+      <style>
+        /* VSBuilder Preview Base Styles */
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          line-height: 1.6;
+          color: #1a1a2e;
+          margin: 0;
+          padding: 0;
+        }
+        img { max-width: 100%; height: auto; }
+        a { color: inherit; }
+        .shopify-section {
+          padding: 20px 0;
+          border-bottom: 1px solid #eee;
+        }
+        .shopify-section:hover {
+          outline: 2px dashed #5c5cf0;
+          outline-offset: -2px;
+        }
+        /* Grid system */
+        .grid { display: grid; gap: 20px; }
+        .grid--2-col { grid-template-columns: repeat(2, 1fr); }
+        .grid--3-col { grid-template-columns: repeat(3, 1fr); }
+        .grid--4-col { grid-template-columns: repeat(4, 1fr); }
+        /* Container */
+        .page-width, .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+        /* Buttons */
+        .button, .btn {
+          display: inline-block;
+          padding: 12px 24px;
+          background: #1a1a2e;
+          color: white;
+          text-decoration: none;
+          border-radius: 4px;
+        }
+        /* Headings */
+        h1, h2, h3, h4, h5, h6 { margin-top: 0; line-height: 1.2; }
+        h1 { font-size: 2.5rem; }
+        h2 { font-size: 2rem; }
+        h3 { font-size: 1.5rem; }
+      </style>
+    `;
+
     // Inject editor communication script
     const editorScript = `
       <script>
@@ -120,6 +166,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       html = html.replace("</body>", `${editorScript}</body>`);
     } else {
       html += editorScript;
+    }
+
+    // Inject base styles into head
+    if (html.includes("</head>")) {
+      html = html.replace("</head>", `${baseStyles}</head>`);
+    } else if (html.includes("<body")) {
+      html = html.replace("<body", `${baseStyles}<body`);
+    } else {
+      html = baseStyles + html;
     }
 
     return json({ html, success: true });
