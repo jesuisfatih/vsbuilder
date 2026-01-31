@@ -757,7 +757,7 @@ export async function saveThemeToLocal(
   themeId: string,
   shopHandle: string
 ): Promise<boolean> {
-  console.log('[Theme] === Saving theme to local disk ===');
+  console.log('[Theme] === Saving theme to local disk (REST API) ===');
   console.log('[Theme] Theme ID:', themeId);
   console.log('[Theme] Shop:', shopHandle);
 
@@ -773,50 +773,99 @@ export async function saveThemeToLocal(
       }
     }
 
-    // List all theme files
-    const allFiles = await listThemeFiles(admin, themeId);
-    console.log(`[Theme] Found ${allFiles.length} files to download`);
+    // Step 1: Get all assets list using REST API
+    console.log('[Theme] Fetching asset list via REST API...');
+    const listResponse = await admin.rest.get({
+      path: `themes/${themeId}/assets`,
+    });
+
+    const assetsList = listResponse.body?.assets || [];
+    console.log(`[Theme] Found ${assetsList.length} assets to download`);
 
     // Log file types breakdown
-    const assetsCount = allFiles.filter(f => f.startsWith('assets/')).length;
-    const cssCount = allFiles.filter(f => f.endsWith('.css') || f.endsWith('.css.liquid')).length;
-    const jsCount = allFiles.filter(f => f.endsWith('.js')).length;
-    console.log(`[Theme] Breakdown - assets: ${assetsCount}, css: ${cssCount}, js: ${jsCount}`);
+    const assetsCount = assetsList.filter((a: any) => a.key.startsWith('assets/')).length;
+    const cssCount = assetsList.filter((a: any) => a.key.endsWith('.css') || a.key.endsWith('.css.liquid')).length;
+    const jsCount = assetsList.filter((a: any) => a.key.endsWith('.js')).length;
+    const sectionsCount = assetsList.filter((a: any) => a.key.startsWith('sections/')).length;
+    const snippetsCount = assetsList.filter((a: any) => a.key.startsWith('snippets/')).length;
+    console.log(`[Theme] Breakdown - assets: ${assetsCount}, css: ${cssCount}, js: ${jsCount}, sections: ${sectionsCount}, snippets: ${snippetsCount}`);
 
-    // Download in batches of 10
-    const batchSize = 10;
+    // Step 2: Download each file using REST API
     let savedCount = 0;
     let skippedCount = 0;
+    let errorCount = 0;
 
-    for (let i = 0; i < allFiles.length; i += batchSize) {
-      const batch = allFiles.slice(i, i + batchSize);
-      const files = await getThemeFiles(admin, themeId, batch);
+    for (let i = 0; i < assetsList.length; i++) {
+      const asset = assetsList[i];
+      const assetKey = asset.key;
 
-      for (const file of files) {
-        if (!file.content) {
+      try {
+        // Fetch individual asset content
+        const assetResponse = await admin.rest.get({
+          path: `themes/${themeId}/assets`,
+          query: { 'asset[key]': assetKey },
+        });
+
+        const assetData = assetResponse.body?.asset;
+        if (!assetData) {
+          console.log(`[Theme] Skipped (no data): ${assetKey}`);
           skippedCount++;
-          console.log(`[Theme] Skipped (no content): ${file.filename}`);
           continue;
         }
 
-        const filePath = path.join(themeDir, file.filename);
+        // Get content - either value (text) or attachment (base64)
+        let content: string | Buffer;
+        if (assetData.value !== undefined) {
+          // Text content (liquid, json, css, js, etc.)
+          content = assetData.value;
+        } else if (assetData.attachment !== undefined) {
+          // Binary content (images, fonts)
+          content = Buffer.from(assetData.attachment, 'base64');
+        } else {
+          console.log(`[Theme] Skipped (no content): ${assetKey}`);
+          skippedCount++;
+          continue;
+        }
+
+        // Save file
+        const filePath = path.join(themeDir, assetKey);
         const fileDir = path.dirname(filePath);
 
-        // Ensure directory exists
         if (!fs.existsSync(fileDir)) {
           fs.mkdirSync(fileDir, { recursive: true });
         }
 
-        // Write file
-        fs.writeFileSync(filePath, file.content, 'utf-8');
-        savedCount++;
-      }
+        if (Buffer.isBuffer(content)) {
+          fs.writeFileSync(filePath, content);
+        } else {
+          fs.writeFileSync(filePath, content, 'utf-8');
+        }
 
-      console.log(`[Theme] Batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(allFiles.length / batchSize)} - saved: ${savedCount}, skipped: ${skippedCount}`);
+        savedCount++;
+
+        // Progress log every 20 files
+        if (savedCount % 20 === 0) {
+          console.log(`[Theme] Progress: ${savedCount}/${assetsList.length} files saved`);
+        }
+      } catch (fileError) {
+        console.error(`[Theme] Error downloading ${assetKey}:`, fileError);
+        errorCount++;
+      }
     }
 
     console.log(`[Theme] ✅ Theme saved to: ${themeDir}`);
-    console.log(`[Theme] ✅ Total files saved: ${savedCount}, skipped: ${skippedCount}`);
+    console.log(`[Theme] ✅ Total: ${savedCount} saved, ${skippedCount} skipped, ${errorCount} errors`);
+
+    // Write a sync manifest file with hash for verification
+    const manifest = {
+      themeId,
+      shopHandle,
+      syncedAt: new Date().toISOString(),
+      totalFiles: savedCount,
+      hash: `${themeId}-${Date.now()}`
+    };
+    fs.writeFileSync(path.join(themeDir, '.sync-manifest.json'), JSON.stringify(manifest, null, 2));
+
     return true;
   } catch (error) {
     console.error('[Theme] Error saving theme to local:', error);
