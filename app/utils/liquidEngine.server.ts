@@ -105,7 +105,7 @@ export class ShopifyLiquidEngine {
       strictVariables: false,
       lenientIf: true, // Be lenient with if/unless conditions
       jsTruthy: true, // Use JavaScript truthiness
-      outputEscape: "escape", // Escape output by default
+      // NOTE: outputEscape removed - we need raw HTML output for theme templates
     });
 
     this.registerShopifyTags();
