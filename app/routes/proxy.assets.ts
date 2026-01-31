@@ -87,7 +87,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .replace(/[<>:"|?*]/g, "");
 
     // Build file path
-    const filePath = path.join(THEMES_DIR, shopHandle, themeId, "assets", sanitizedFile);
+    const themeDir = path.join(THEMES_DIR, shopHandle, themeId);
+    const filePath = path.join(themeDir, "assets", sanitizedFile);
 
     // Security check: ensure path is within themes directory
     const resolvedPath = path.resolve(filePath);
@@ -99,14 +100,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
+      // Try .liquid version for CSS/JS
+      const liquidPath = filePath + ".liquid";
+      if (fs.existsSync(liquidPath)) {
+        return await serveLiquidAsset(liquidPath, themeDir);
+      }
+
       // Try without assets prefix
-      const altPath = path.join(THEMES_DIR, shopHandle, themeId, sanitizedFile);
+      const altPath = path.join(themeDir, sanitizedFile);
       if (fs.existsSync(altPath)) {
         return serveFile(altPath);
       }
 
+      // Try .liquid version of alt path
+      const altLiquidPath = altPath + ".liquid";
+      if (fs.existsSync(altLiquidPath)) {
+        return await serveLiquidAsset(altLiquidPath, themeDir);
+      }
+
       console.error(`[ProxyAssets] File not found: ${filePath}`);
       return new Response("Not Found", { status: 404 });
+    }
+
+    // Check if it's a .liquid file that needs processing
+    if (filePath.endsWith(".liquid")) {
+      return await serveLiquidAsset(filePath, themeDir);
     }
 
     return serveFile(filePath);
@@ -136,4 +154,71 @@ function serveFile(filePath: string): Response {
       "Access-Control-Allow-Origin": "*",
     },
   });
+}
+
+// Process .liquid assets (CSS/JS with Liquid syntax)
+async function serveLiquidAsset(filePath: string, themeDir: string): Promise<Response> {
+  const { Liquid } = await import("liquidjs");
+
+  const content = fs.readFileSync(filePath, "utf-8");
+
+  // Determine output type from filename (e.g., base.css.liquid -> css)
+  let outputType = "text/plain";
+  let cacheControl = "public, max-age=3600";
+
+  if (filePath.includes(".css.liquid") || filePath.endsWith(".scss.liquid")) {
+    outputType = "text/css";
+  } else if (filePath.includes(".js.liquid")) {
+    outputType = "application/javascript";
+  }
+
+  try {
+    // Create a simple Liquid engine for asset processing
+    const engine = new Liquid({
+      root: [path.join(themeDir, "snippets"), path.join(themeDir, "assets")],
+      extname: ".liquid",
+      strictVariables: false,
+      strictFilters: false,
+    });
+
+    // Load theme settings for CSS variables
+    const settingsPath = path.join(themeDir, "config", "settings_data.json");
+    let settings: Record<string, any> = {};
+    if (fs.existsSync(settingsPath)) {
+      try {
+        const settingsData = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+        settings = settingsData.current?.settings || settingsData.current || {};
+      } catch {
+        // Ignore settings parse errors
+      }
+    }
+
+    const context = {
+      settings,
+      shop: {
+        name: "Store",
+        url: "/",
+      },
+    };
+
+    const rendered = await engine.parseAndRender(content, context);
+
+    return new Response(rendered, {
+      headers: {
+        "Content-Type": outputType,
+        "Cache-Control": cacheControl,
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  } catch (error) {
+    console.error(`[ProxyAssets] Error processing Liquid asset ${filePath}:`, error);
+    // Return original content if Liquid processing fails
+    return new Response(content, {
+      headers: {
+        "Content-Type": outputType,
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  }
 }

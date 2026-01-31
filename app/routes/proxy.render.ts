@@ -8,6 +8,7 @@ import { type LoaderFunctionArgs } from "@remix-run/node";
 import * as fs from "fs";
 import * as path from "path";
 import { authenticate } from "../shopify.server";
+import { getEditorBridgeScript } from "../utils/editorBridge";
 import { createShopifyLiquidEngine } from "../utils/liquidEngine.server";
 
 const THEMES_DIR = process.env.THEMES_DIR || path.join(process.cwd(), "themes");
@@ -82,135 +83,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       html = await engine.renderPage(template);
     }
 
-    // Inject editor communication script
-    const editorScript = `
-      <script>
-        // VSBuilder Preview Communication
-        window.VSBuilder = {
-          ready: false,
-          highlightedSection: null,
-
-          init: function() {
-            this.ready = true;
-            window.parent.postMessage({ type: 'vsbuilder:ready' }, '*');
-            this.setupClickHandlers();
-          },
-
-          setupClickHandlers: function() {
-            // Add click handlers to sections
-            document.querySelectorAll('[id^="shopify-section-"]').forEach(section => {
-              section.style.cursor = 'pointer';
-              section.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const sectionId = section.id.replace('shopify-section-', '');
-                window.parent.postMessage({
-                  type: 'vsbuilder:sectionClick',
-                  sectionId: sectionId,
-                  group: 'template'
-                }, '*');
-              });
-
-              // Hover effects
-              section.addEventListener('mouseenter', () => {
-                if (this.highlightedSection !== section) {
-                  section.style.outline = '2px dashed rgba(139, 92, 246, 0.5)';
-                  section.style.outlineOffset = '-2px';
-                }
-              });
-
-              section.addEventListener('mouseleave', () => {
-                if (this.highlightedSection !== section) {
-                  section.style.outline = 'none';
-                }
-              });
-            });
-          },
-
-          highlightSection: function(sectionId) {
-            this.clearAllHighlights();
-            const el = document.getElementById('shopify-section-' + sectionId);
-            if (el) {
-              el.style.outline = '3px solid #8b5cf6';
-              el.style.outlineOffset = '-3px';
-              el.style.boxShadow = '0 0 20px rgba(139, 92, 246, 0.3)';
-              this.highlightedSection = el;
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          },
-
-          clearAllHighlights: function() {
-            document.querySelectorAll('[id^="shopify-section-"]').forEach(el => {
-              el.style.outline = 'none';
-              el.style.boxShadow = 'none';
-            });
-            this.highlightedSection = null;
-          }
-        };
-
-        // Prevent navigation
-        document.addEventListener('click', function(e) {
-          const link = e.target.closest('a');
-          if (link && link.href && !link.href.startsWith('javascript:')) {
-            e.preventDefault();
-            window.parent.postMessage({
-              type: 'vsbuilder:navigate',
-              url: link.href
-            }, '*');
-          }
-        });
-
-        // Prevent form submissions
-        document.addEventListener('submit', function(e) {
-          e.preventDefault();
-          console.log('Form submission blocked in preview');
-        });
-
-        // Listen for messages from editor
-        window.addEventListener('message', function(e) {
-          if (!e.data || !e.data.type) return;
-
-          switch(e.data.type) {
-            case 'vsbuilder:highlight':
-              VSBuilder.highlightSection(e.data.sectionId);
-              break;
-            case 'vsbuilder:clearHighlight':
-              VSBuilder.clearAllHighlights();
-              break;
-            case 'vsbuilder:reload':
-              location.reload();
-              break;
-            case 'vsbuilder:updateSettings':
-              // Handle live settings update
-              break;
-          }
-        });
-
-        // Initialize when DOM ready
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', function() {
-            VSBuilder.init();
-          });
-        } else {
-          VSBuilder.init();
-        }
-      </script>
-
-      <style>
-        /* VSBuilder Preview Overlay Styles */
-        [id^="shopify-section-"] {
-          position: relative;
-        }
-
-        [id^="shopify-section-"]:hover::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background: rgba(139, 92, 246, 0.03);
-          pointer-events: none;
-          z-index: 9998;
-        }
-      </style>
-    `;
+    // Get editor communication script from shared module
+    const editorScript = getEditorBridgeScript();
 
     // Build asset base URL
     const assetBaseUrl = `/apps/vsbuilder/assets?themeId=${cleanThemeId}&shopHandle=${shopHandle}&file=`;

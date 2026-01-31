@@ -9,6 +9,8 @@ import { createHash, createHmac } from "crypto";
 import * as fs from "fs";
 import { Liquid } from "liquidjs";
 import * as path from "path";
+import { generateCSSVariables as generateCSSVars, generateGoogleFontsUrl, parseShopifyFont } from "./cssVariables.server";
+import { buildMockContext } from "./mockData.server";
 
 // ============================================
 // TYPES
@@ -1709,6 +1711,671 @@ export class ShopifyLiquidEngine {
       if (typeof str !== "string") return str;
       return encodeURIComponent(str);
     });
+
+    // ============================================
+    // ADVANCED IMAGE FILTERS
+    // ============================================
+
+    // image_url with width, height, crop, format parameters
+    this.engine.registerFilter("image_url", (image: any, ...args: any[]) => {
+      if (!image) return "";
+
+      // Get source URL
+      let src = "";
+      if (typeof image === "string") {
+        src = image;
+      } else if (image.src) {
+        src = image.src;
+      } else if (image.url) {
+        src = image.url;
+      }
+
+      if (!src) return "";
+
+      // Parse arguments (can be named or positional)
+      const params: Record<string, any> = {};
+      for (const arg of args) {
+        if (typeof arg === "object" && arg !== null) {
+          Object.assign(params, arg);
+        } else if (typeof arg === "number") {
+          if (!params.width) params.width = arg;
+          else if (!params.height) params.height = arg;
+        }
+      }
+
+      // Build URL parameters
+      const searchParams = new URLSearchParams();
+      if (params.width) searchParams.set("width", String(params.width));
+      if (params.height) searchParams.set("height", String(params.height));
+      if (params.crop) searchParams.set("crop", params.crop);
+      if (params.format) searchParams.set("format", params.format);
+      if (params.scale) searchParams.set("scale", String(params.scale));
+
+      const queryString = searchParams.toString();
+      return queryString ? `${src}?${queryString}` : src;
+    });
+
+    // Generate srcset for responsive images
+    this.engine.registerFilter("image_srcset", (image: any, widths?: number[]) => {
+      if (!image) return "";
+
+      const src = typeof image === "string" ? image : (image.src || image.url || "");
+      if (!src) return "";
+
+      const defaultWidths = [180, 360, 540, 720, 900, 1080, 1296, 1512, 1728, 2048];
+      const widthList = widths || defaultWidths;
+
+      return widthList
+        .map(w => `${src}${src.includes("?") ? "&" : "?"}width=${w} ${w}w`)
+        .join(", ");
+    });
+
+    // img_tag - create full img element
+    this.engine.registerFilter("img_tag", (image: any, alt?: string, className?: string) => {
+      if (!image) return "";
+
+      const src = typeof image === "string" ? image : (image.src || image.url || "");
+      const altText = alt || (typeof image === "object" ? image.alt : "") || "";
+      const classAttr = className ? ` class="${className}"` : "";
+
+      return `<img src="${src}" alt="${altText}"${classAttr} loading="lazy">`;
+    });
+
+    // image_tag (Shopify version with srcset)
+    this.engine.registerFilter("image_tag", (image: any, options?: any) => {
+      if (!image) return "";
+
+      const src = typeof image === "string" ? image : (image.src || image.url || "");
+      const alt = options?.alt || (typeof image === "object" ? image.alt : "") || "";
+      const width = options?.width || (typeof image === "object" ? image.width : "");
+      const height = options?.height || (typeof image === "object" ? image.height : "");
+      const className = options?.class || "";
+      const loading = options?.loading || "lazy";
+      const preload = options?.preload;
+
+      let attrs = `src="${src}" alt="${alt}"`;
+      if (width) attrs += ` width="${width}"`;
+      if (height) attrs += ` height="${height}"`;
+      if (className) attrs += ` class="${className}"`;
+      attrs += ` loading="${loading}"`;
+
+      // Add srcset if widths provided
+      if (options?.widths) {
+        const srcset = options.widths
+          .map((w: number) => `${src}${src.includes("?") ? "&" : "?"}width=${w} ${w}w`)
+          .join(", ");
+        attrs += ` srcset="${srcset}"`;
+        if (options.sizes) {
+          attrs += ` sizes="${options.sizes}"`;
+        }
+      }
+
+      let tag = `<img ${attrs}>`;
+
+      // Add preload link if requested
+      if (preload) {
+        tag = `<link rel="preload" as="image" href="${src}">\n${tag}`;
+      }
+
+      return tag;
+    });
+
+    // ============================================
+    // FONT FILTERS
+    // ============================================
+
+    // font_face - generate @font-face CSS
+    this.engine.registerFilter("font_face", (font: any, options?: any) => {
+      if (!font) return "";
+
+      let fontFamily = "system-ui";
+      let fontWeight = 400;
+      let fontStyle = "normal";
+
+      if (typeof font === "string") {
+        // Parse Shopify font format: family_nW
+        const match = font.match(/^(.+)_([ni])(\d)$/);
+        if (match) {
+          fontFamily = match[1].split("_").map((w: string) =>
+            w.charAt(0).toUpperCase() + w.slice(1)
+          ).join(" ");
+          fontStyle = match[2] === "i" ? "italic" : "normal";
+          fontWeight = parseInt(match[3]) * 100;
+        } else {
+          fontFamily = font;
+        }
+      }
+
+      return `@font-face {
+  font-family: '${fontFamily}';
+  font-weight: ${fontWeight};
+  font-style: ${fontStyle};
+  font-display: swap;
+}`;
+    });
+
+    // font_url - get URL for font file
+    this.engine.registerFilter("font_url", (font: any) => {
+      if (!font) return "";
+
+      let fontFamily = "Arial";
+      if (typeof font === "string") {
+        const match = font.match(/^(.+)_([ni])(\d)$/);
+        fontFamily = match ? match[1] : font;
+      }
+
+      const familyParam = fontFamily.split("_").map((w: string) =>
+        w.charAt(0).toUpperCase() + w.slice(1)
+      ).join("+");
+
+      return `https://fonts.googleapis.com/css2?family=${familyParam}:wght@400;500;600;700&display=swap`;
+    });
+
+    // font_modify - modify font weight/style
+    this.engine.registerFilter("font_modify", (font: any, property: string, value: any) => {
+      if (!font) return font;
+      return font; // Return as-is for now
+    });
+
+    // ============================================
+    // PAYMENT & ICON FILTERS
+    // ============================================
+
+    // payment_type_svg_tag - generate SVG for payment type
+    this.engine.registerFilter("payment_type_svg_tag", (type: string, options?: any) => {
+      const paymentIcons: Record<string, string> = {
+        visa: '<svg viewBox="0 0 38 24" class="payment-icon"><path d="M35 0H3C1.3 0 0 1.3 0 3v18c0 1.7 1.4 3 3 3h32c1.7 0 3-1.3 3-3V3c0-1.7-1.4-3-3-3z" fill="#0E4595"/><path d="M27.4 7.5l-3.3 9h-2.2l-1.7-7.1c-.1-.4-.2-.5-.5-.7-.5-.3-1.4-.6-2.1-.8l.1-.4h3.5c.5 0 .9.3 1 .9l.9 4.6 2.1-5.5h2.2z" fill="#fff"/></svg>',
+        mastercard: '<svg viewBox="0 0 38 24" class="payment-icon"><circle cx="15" cy="12" r="7" fill="#EB001B"/><circle cx="23" cy="12" r="7" fill="#F79E1B"/><path d="M22 12c0-2.4-1.2-4.5-3-5.7-1.8 1.3-3 3.4-3 5.7s1.2 4.5 3 5.7c1.8-1.2 3-3.3 3-5.7z" fill="#FF5F00"/></svg>',
+        amex: '<svg viewBox="0 0 38 24" class="payment-icon"><path d="M35 0H3C1.3 0 0 1.3 0 3v18c0 1.7 1.4 3 3 3h32c1.7 0 3-1.3 3-3V3c0-1.7-1.4-3-3-3z" fill="#006FCF"/><path d="M8 8h22v8H8z" fill="#fff"/></svg>',
+        paypal: '<svg viewBox="0 0 38 24" class="payment-icon"><path d="M35 0H3C1.3 0 0 1.3 0 3v18c0 1.7 1.4 3 3 3h32c1.7 0 3-1.3 3-3V3c0-1.7-1.4-3-3-3z" fill="#003087"/><path d="M23.9 8.3c.2-1 0-1.7-.6-2.3-.6-.7-1.8-1-3.2-1h-4.1c-.3 0-.5.2-.6.5L14 14.6c0 .2.1.4.3.4h2.3l.6-3.5v.2c.1-.3.3-.5.6-.5h1.3c2.5 0 4.5-1 5-4z" fill="#fff"/></svg>',
+        apple_pay: '<svg viewBox="0 0 38 24" class="payment-icon"><path d="M35 0H3C1.3 0 0 1.3 0 3v18c0 1.7 1.4 3 3 3h32c1.7 0 3-1.3 3-3V3c0-1.7-1.4-3-3-3z" fill="#000"/><path d="M13 9c.3-.4.5-.9.5-1.4-.5 0-1.1.3-1.5.7-.3.4-.6.9-.5 1.4.5 0 1.1-.3 1.5-.7zm.5 1c-.8 0-1.5.5-1.9.5-.4 0-1-.5-1.7-.5-.9 0-1.7.5-2.2 1.3-.9 1.6-.2 4 .7 5.3.5.6 1 1.3 1.7 1.3.7 0 .9-.4 1.7-.4s1 .4 1.7.4c.7 0 1.1-.6 1.6-1.3.5-.7.7-1.4.7-1.5-1.5-.6-1.5-2.8-.1-3.6-.5-.6-1.3-1-2.2-1v-.1z" fill="#fff"/></svg>',
+        google_pay: '<svg viewBox="0 0 38 24" class="payment-icon"><path d="M35 0H3C1.3 0 0 1.3 0 3v18c0 1.7 1.4 3 3 3h32c1.7 0 3-1.3 3-3V3c0-1.7-1.4-3-3-3z" fill="#fff" stroke="#ddd"/><path d="M17.2 12c0-.2 0-.4-.1-.6h-3.6v1.2h2.1c-.1.5-.3.9-.7 1.2-.4.3-.9.5-1.5.5-.6 0-1.1-.2-1.5-.5-.4-.4-.7-.9-.7-1.5 0-.6.3-1.1.7-1.5.4-.3.9-.5 1.5-.5.5 0 1 .2 1.4.5l.9-.9c-.6-.5-1.3-.8-2.3-.8-1.5 0-2.8.8-3.4 2-.3.6-.4 1.2-.4 1.8s.1 1.2.4 1.8c.6 1.2 1.9 2 3.4 2 1.5 0 2.8-.6 3.4-1.8.3-.5.4-1.1.4-1.8l-.1-.1z" fill="#4285F4"/></svg>',
+        shopify_pay: '<svg viewBox="0 0 38 24" class="payment-icon"><path d="M35 0H3C1.3 0 0 1.3 0 3v18c0 1.7 1.4 3 3 3h32c1.7 0 3-1.3 3-3V3c0-1.7-1.4-3-3-3z" fill="#5A31F4"/><path d="M21.4 8c-.5 0-.9.1-1.2.4-.4.3-.6.7-.7 1.2h3.6c0-.5-.2-.9-.5-1.2-.3-.3-.7-.4-1.2-.4zm2.4 2.8h-4.8c0 .6.2 1 .5 1.3.3.3.8.5 1.3.5.6 0 1.2-.3 1.6-.8l1.1.8c-.6.8-1.5 1.2-2.7 1.2-1 0-1.8-.3-2.4-.9-.6-.6-.9-1.5-.9-2.5 0-1 .3-1.9.9-2.5.6-.6 1.4-.9 2.4-.9 1 0 1.7.3 2.3.9.6.6.8 1.4.8 2.4 0 .1 0 .3-.1.5z" fill="#fff"/></svg>',
+      };
+
+      const normalizedType = (type || "").toLowerCase().replace(/[^a-z_]/g, "_");
+      const className = options?.class || "";
+
+      let svg = paymentIcons[normalizedType];
+      if (!svg) {
+        return `<span class="payment-icon payment-icon--unknown ${className}">${type}</span>`;
+      }
+
+      if (className) {
+        svg = svg.replace('class="payment-icon"', `class="payment-icon ${className}"`);
+      }
+
+      return svg;
+    });
+
+    // payment_button - generate payment button HTML
+    this.engine.registerFilter("payment_button", (checkout_url: string, options?: any) => {
+      return `<a href="${checkout_url}" class="shopify-payment-button">${options?.label || "Buy now"}</a>`;
+    });
+
+    // ============================================
+    // PLACEHOLDER FILTERS
+    // ============================================
+
+    // placeholder_svg_tag - generate placeholder SVG
+    this.engine.registerFilter("placeholder_svg_tag", (type?: string, options?: any) => {
+      const placeholderType = type || "image";
+      const className = options?.class || "";
+
+      const colors: Record<string, string> = {
+        product: "#e8e8e8",
+        collection: "#e8e8e8",
+        image: "#f0f0f0",
+        lifestyle: "#d4d4d4",
+      };
+
+      const bgColor = colors[placeholderType] || colors.image;
+
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 525 525" class="placeholder-svg ${className}">
+        <rect width="100%" height="100%" fill="${bgColor}"/>
+        <path d="M262.5 120c-78.8 0-142.5 63.7-142.5 142.5S183.7 405 262.5 405 405 341.3 405 262.5 341.3 120 262.5 120zm0 236.3c-51.8 0-93.8-42-93.8-93.8s42-93.8 93.8-93.8 93.8 42 93.8 93.8-42 93.8-93.8 93.8z" fill="#b0b0b0" opacity="0.5"/>
+      </svg>`;
+    });
+
+    // ============================================
+    // EXTERNAL VIDEO FILTERS
+    // ============================================
+
+    // external_video_url - get embed URL for YouTube/Vimeo
+    this.engine.registerFilter("external_video_url", (url: string, options?: any) => {
+      if (!url) return "";
+
+      // YouTube
+      const youtubeMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/);
+      if (youtubeMatch) {
+        let embedUrl = `https://www.youtube.com/embed/${youtubeMatch[1]}`;
+        const params = new URLSearchParams();
+        if (options?.autoplay) params.set("autoplay", "1");
+        if (options?.loop) params.set("loop", "1");
+        if (options?.mute) params.set("mute", "1");
+        if (options?.controls === false) params.set("controls", "0");
+        const queryString = params.toString();
+        return queryString ? `${embedUrl}?${queryString}` : embedUrl;
+      }
+
+      // Vimeo
+      const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+      if (vimeoMatch) {
+        let embedUrl = `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+        const params = new URLSearchParams();
+        if (options?.autoplay) params.set("autoplay", "1");
+        if (options?.loop) params.set("loop", "1");
+        if (options?.muted) params.set("muted", "1");
+        const queryString = params.toString();
+        return queryString ? `${embedUrl}?${queryString}` : embedUrl;
+      }
+
+      return url;
+    });
+
+    // Helper function for video URL conversion
+    const getExternalVideoUrl = (url: string, options?: any): string => {
+      if (!url) return "";
+
+      // YouTube
+      const youtubeMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/);
+      if (youtubeMatch) {
+        let embedUrl = `https://www.youtube.com/embed/${youtubeMatch[1]}`;
+        const params = new URLSearchParams();
+        if (options?.autoplay) params.set("autoplay", "1");
+        if (options?.loop) params.set("loop", "1");
+        if (options?.mute) params.set("mute", "1");
+        if (options?.controls === false) params.set("controls", "0");
+        const queryString = params.toString();
+        return queryString ? `${embedUrl}?${queryString}` : embedUrl;
+      }
+
+      // Vimeo
+      const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+      if (vimeoMatch) {
+        let embedUrl = `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+        const params = new URLSearchParams();
+        if (options?.autoplay) params.set("autoplay", "1");
+        if (options?.loop) params.set("loop", "1");
+        if (options?.muted) params.set("muted", "1");
+        const queryString = params.toString();
+        return queryString ? `${embedUrl}?${queryString}` : embedUrl;
+      }
+
+      return url;
+    };
+
+    // external_video_tag - generate iframe for video
+    this.engine.registerFilter("external_video_tag", (url: string, options?: any) => {
+      const embedUrl = getExternalVideoUrl(url, options);
+      const title = options?.title || "Video";
+      const className = options?.class || "";
+
+      return `<iframe src="${embedUrl}" title="${title}" class="${className}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`;
+    });
+
+    // ============================================
+    // METAFIELD FILTERS
+    // ============================================
+
+    // metafield_tag - render metafield value appropriately
+    this.engine.registerFilter("metafield_tag", (metafield: any, options?: any) => {
+      if (!metafield) return "";
+
+      const value = metafield.value;
+      const type = metafield.type;
+
+      switch (type) {
+        case "single_line_text_field":
+        case "multi_line_text_field":
+          return value || "";
+        case "rich_text_field":
+          return value || "";
+        case "number_integer":
+        case "number_decimal":
+          return String(value);
+        case "boolean":
+          return value ? "Yes" : "No";
+        case "color":
+          return `<span style="background-color: ${value}; display: inline-block; width: 1em; height: 1em;"></span>`;
+        case "url":
+          return `<a href="${value}">${value}</a>`;
+        case "date":
+        case "date_time":
+          return new Date(value).toLocaleDateString();
+        case "file_reference":
+          if (value?.url) {
+            const isImage = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(value.url);
+            if (isImage) {
+              return `<img src="${value.url}" alt="${value.alt || ""}" loading="lazy">`;
+            }
+            return `<a href="${value.url}">Download</a>`;
+          }
+          return "";
+        case "product_reference":
+        case "collection_reference":
+        case "page_reference":
+          return value?.title || "";
+        case "list.single_line_text_field":
+          return Array.isArray(value) ? value.join(", ") : String(value);
+        default:
+          return String(value || "");
+      }
+    });
+
+    // metafield_text - get text value from metafield
+    this.engine.registerFilter("metafield_text", (metafield: any) => {
+      if (!metafield) return "";
+      return String(metafield.value || "");
+    });
+
+    // ============================================
+    // COLOR FILTERS
+    // ============================================
+
+    // brightness_difference - calculate WCAG brightness difference
+    this.engine.registerFilter("brightness_difference", (color1: string, color2: string) => {
+      const parseHex = (hex: string) => {
+        const match = hex.match(/^#?([0-9A-Fa-f]{6})$/);
+        if (!match) return { r: 0, g: 0, b: 0 };
+        const h = match[1];
+        return {
+          r: parseInt(h.slice(0, 2), 16),
+          g: parseInt(h.slice(2, 4), 16),
+          b: parseInt(h.slice(4, 6), 16),
+        };
+      };
+
+      const c1 = parseHex(color1 || "#000000");
+      const c2 = parseHex(color2 || "#ffffff");
+
+      const brightness1 = (c1.r * 299 + c1.g * 587 + c1.b * 114) / 1000;
+      const brightness2 = (c2.r * 299 + c2.g * 587 + c2.b * 114) / 1000;
+
+      return Math.abs(brightness1 - brightness2);
+    });
+
+    // color_difference - calculate color difference
+    this.engine.registerFilter("color_difference", (color1: string, color2: string) => {
+      const parseHex = (hex: string) => {
+        const match = hex.match(/^#?([0-9A-Fa-f]{6})$/);
+        if (!match) return { r: 0, g: 0, b: 0 };
+        const h = match[1];
+        return {
+          r: parseInt(h.slice(0, 2), 16),
+          g: parseInt(h.slice(2, 4), 16),
+          b: parseInt(h.slice(4, 6), 16),
+        };
+      };
+
+      const c1 = parseHex(color1 || "#000000");
+      const c2 = parseHex(color2 || "#ffffff");
+
+      return Math.abs(c1.r - c2.r) + Math.abs(c1.g - c2.g) + Math.abs(c1.b - c2.b);
+    });
+
+    // color_mix - mix two colors
+    this.engine.registerFilter("color_mix", (color1: string, color2: string, weight?: number) => {
+      const w = weight ?? 50;
+      const parseHex = (hex: string) => {
+        const match = hex.match(/^#?([0-9A-Fa-f]{6})$/);
+        if (!match) return { r: 0, g: 0, b: 0 };
+        const h = match[1];
+        return {
+          r: parseInt(h.slice(0, 2), 16),
+          g: parseInt(h.slice(2, 4), 16),
+          b: parseInt(h.slice(4, 6), 16),
+        };
+      };
+
+      const c1 = parseHex(color1 || "#000000");
+      const c2 = parseHex(color2 || "#ffffff");
+      const ratio = w / 100;
+
+      const r = Math.round(c1.r * (1 - ratio) + c2.r * ratio);
+      const g = Math.round(c1.g * (1 - ratio) + c2.g * ratio);
+      const b = Math.round(c1.b * (1 - ratio) + c2.b * ratio);
+
+      return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+    });
+
+    // Helper function for color mixing
+    const mixColors = (color1: string, color2: string, weight: number): string => {
+      const w = weight ?? 50;
+      const parseHex = (hex: string) => {
+        const match = hex.match(/^#?([0-9A-Fa-f]{6})$/);
+        if (!match) return { r: 0, g: 0, b: 0 };
+        const h = match[1];
+        return {
+          r: parseInt(h.slice(0, 2), 16),
+          g: parseInt(h.slice(2, 4), 16),
+          b: parseInt(h.slice(4, 6), 16),
+        };
+      };
+      const c1 = parseHex(color1 || "#000000");
+      const c2 = parseHex(color2 || "#ffffff");
+      const ratio = w / 100;
+      const r = Math.round(c1.r * (1 - ratio) + c2.r * ratio);
+      const g = Math.round(c1.g * (1 - ratio) + c2.g * ratio);
+      const b = Math.round(c1.b * (1 - ratio) + c2.b * ratio);
+      return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+    };
+
+    // color_lighten - lighten a color
+    this.engine.registerFilter("color_lighten", (color: string, amount?: number) => {
+      return mixColors(color, "#ffffff", amount || 20);
+    });
+
+    // color_darken - darken a color
+    this.engine.registerFilter("color_darken", (color: string, amount?: number) => {
+      return mixColors(color, "#000000", amount || 20);
+    });
+
+    // color_saturate - adjust saturation
+    this.engine.registerFilter("color_saturate", (color: string, amount?: number) => {
+      return color; // Simplified - just return original
+    });
+
+    // color_desaturate - reduce saturation
+    this.engine.registerFilter("color_desaturate", (color: string, amount?: number) => {
+      return color; // Simplified - just return original
+    });
+
+    // color_to_rgb - convert to rgb format
+    this.engine.registerFilter("color_to_rgb", (color: string) => {
+      const match = color?.match(/^#?([0-9A-Fa-f]{6})$/);
+      if (!match) return color;
+      const h = match[1];
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      return `rgb(${r}, ${g}, ${b})`;
+    });
+
+    // color_to_hex - convert to hex format
+    this.engine.registerFilter("color_to_hex", (color: string) => {
+      const match = color?.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+      if (!match) return color;
+      const r = parseInt(match[1]).toString(16).padStart(2, "0");
+      const g = parseInt(match[2]).toString(16).padStart(2, "0");
+      const b = parseInt(match[3]).toString(16).padStart(2, "0");
+      return `#${r}${g}${b}`;
+    });
+
+    // color_to_hsl - convert to hsl format
+    this.engine.registerFilter("color_to_hsl", (color: string) => {
+      const match = color?.match(/^#?([0-9A-Fa-f]{6})$/);
+      if (!match) return color;
+      const h = match[1];
+      let r = parseInt(h.slice(0, 2), 16) / 255;
+      let g = parseInt(h.slice(2, 4), 16) / 255;
+      let b = parseInt(h.slice(4, 6), 16) / 255;
+
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      let hue = 0, sat = 0;
+      const lum = (max + min) / 2;
+
+      if (max !== min) {
+        const d = max - min;
+        sat = lum > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: hue = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+          case g: hue = ((b - r) / d + 2) / 6; break;
+          case b: hue = ((r - g) / d + 4) / 6; break;
+        }
+      }
+
+      return `hsl(${Math.round(hue * 360)}, ${Math.round(sat * 100)}%, ${Math.round(lum * 100)}%)`;
+    });
+
+    // ============================================
+    // UTILITY FILTERS
+    // ============================================
+
+    // class_list - build class string from conditions
+    this.engine.registerFilter("class_list", (...args: any[]) => {
+      const classes: string[] = [];
+      for (const arg of args) {
+        if (typeof arg === "string" && arg) {
+          classes.push(arg);
+        } else if (Array.isArray(arg)) {
+          classes.push(...arg.filter(Boolean));
+        } else if (typeof arg === "object" && arg !== null) {
+          for (const [cls, condition] of Object.entries(arg)) {
+            if (condition) classes.push(cls);
+          }
+        }
+      }
+      return classes.join(" ");
+    });
+
+    // handle - convert string to handle format
+    this.engine.registerFilter("handle", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    });
+
+    // handleize - alias for handle
+    this.engine.registerFilter("handleize", (str: string) => {
+      if (typeof str !== "string") return str;
+      return str
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    });
+
+    // pluralize - simple pluralization
+    this.engine.registerFilter("pluralize", (count: number, singular: string, plural?: string) => {
+      const n = typeof count === "number" ? count : 0;
+      if (n === 1) return singular;
+      return plural || (singular + "s");
+    });
+
+    // article_img_url - get article image URL
+    this.engine.registerFilter("article_img_url", (article: any, size?: string) => {
+      if (!article) return "";
+      const image = article.image || article.featured_image;
+      if (!image) return "";
+      return typeof image === "string" ? image : (image.src || image.url || "");
+    });
+
+    // collection_img_url - get collection image URL
+    this.engine.registerFilter("collection_img_url", (collection: any, size?: string) => {
+      if (!collection) return "";
+      const image = collection.image || collection.featured_image;
+      if (!image) return "";
+      return typeof image === "string" ? image : (image.src || image.url || "");
+    });
+
+    // product_img_url - get product image URL
+    this.engine.registerFilter("product_img_url", (product: any, size?: string) => {
+      if (!product) return "";
+      const image = product.featured_image || product.image || (product.images && product.images[0]);
+      if (!image) return "";
+      return typeof image === "string" ? image : (image.src || image.url || "");
+    });
+
+    // global_asset_url - Shopify global assets
+    this.engine.registerFilter("global_asset_url", (asset: string) => {
+      return `https://cdn.shopify.com/s/global/${asset}`;
+    });
+
+    // file_url - uploaded files URL
+    this.engine.registerFilter("file_url", (file: string) => {
+      return `/files/${file}`;
+    });
+
+    // file_img_url - file image URL
+    this.engine.registerFilter("file_img_url", (file: string, size?: string) => {
+      return `/files/${file}`;
+    });
+
+    // link_to_vendor - link to vendor page
+    this.engine.registerFilter("link_to_vendor", (vendor: string) => {
+      if (!vendor) return "";
+      const handle = vendor.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      return `<a href="/collections/vendors?q=${encodeURIComponent(vendor)}" title="${vendor}">${vendor}</a>`;
+    });
+
+    // link_to_type - link to product type
+    this.engine.registerFilter("link_to_type", (type: string) => {
+      if (!type) return "";
+      const handle = type.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      return `<a href="/collections/types?q=${encodeURIComponent(type)}" title="${type}">${type}</a>`;
+    });
+
+    // link_to_tag - link to tag
+    this.engine.registerFilter("link_to_tag", (tag: string) => {
+      if (!tag) return "";
+      const handle = tag.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      return `<a href="/collections/all/${handle}" title="${tag}">${tag}</a>`;
+    });
+
+    // within - scope URL within collection
+    this.engine.registerFilter("within", (url: string, collection: any) => {
+      if (!url || !collection) return url;
+      const collectionHandle = collection.handle || collection;
+      return `/collections/${collectionHandle}${url}`;
+    });
+
+    // highlight - highlight search terms
+    this.engine.registerFilter("highlight", (text: string, terms: string) => {
+      if (!text || !terms) return text;
+      const escaped = terms.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`(${escaped})`, "gi");
+      return text.replace(regex, "<mark>$1</mark>");
+    });
+
+    // highlight_active_tag - highlight active tag
+    this.engine.registerFilter("highlight_active_tag", (tag: string, cssClass?: string) => {
+      const className = cssClass || "active";
+      return `<span class="${className}">${tag}</span>`;
+    });
+
+    // login_button - OAuth login button
+    this.engine.registerFilter("login_button", (provider: string, options?: any) => {
+      const label = options?.label || `Sign in with ${provider}`;
+      return `<button class="social-login-button social-login-button--${provider.toLowerCase()}">${label}</button>`;
+    });
+
+    // customer_login_link - link to customer login
+    this.engine.registerFilter("customer_login_link", (text: string) => {
+      return `<a href="/account/login">${text || "Log in"}</a>`;
+    });
+
+    // customer_logout_link - link to customer logout
+    this.engine.registerFilter("customer_logout_link", (text: string) => {
+      return `<a href="/account/logout">${text || "Log out"}</a>`;
+    });
+
+    // customer_register_link - link to customer registration
+    this.engine.registerFilter("customer_register_link", (text: string) => {
+      return `<a href="/account/register">${text || "Create account"}</a>`;
+    });
   }
 
   // ============================================
@@ -1882,264 +2549,23 @@ export class ShopifyLiquidEngine {
 
   private getDefaultContext(): RenderContext & Record<string, any> {
     const settings = this.loadThemeSettings();
-    const mockProducts = this.getMockProducts();
-    const mockCollections = this.getMockCollections();
-    const mockMenus = this.getMockMenus();
+
+    // Use comprehensive mock context from centralized mockData server
+    const mockContext = buildMockContext({
+      shopDomain: 'my-store.myshopify.com',
+      path: '/',
+      template: 'index',
+      customerLoggedIn: false,
+      cartItemCount: 2,
+      designMode: true,
+    });
 
     return {
-      shop: {
-        name: "My Store",
-        url: "https://mystore.myshopify.com",
-        currency: "USD",
-        locale: "en",
-        money_format: "${{amount}}",
-        enabled_payment_types: ["visa", "mastercard", "amex", "paypal"],
-      },
-      page_title: "Home",
-      content_for_header: "",
-      content_for_layout: "",
-      template: "index",
-      request: {
-        path: "/",
-        host: "mystore.myshopify.com",
-        locale: { iso_code: "en" },
-        design_mode: true, // Indicates we're in the editor
-      },
+      ...mockContext,
       settings,
-      localization: {
-        available_languages: [{ iso_code: "en", name: "English" }],
-        language: { iso_code: "en", name: "English" },
-      },
-      // Global objects with mock data
-      product: mockProducts[0],
-      products: mockProducts,
-      collection: mockCollections[0],
-      collections: mockCollections,
-      all_products: this.arrayToHandle(mockProducts),
-      cart: {
-        item_count: 2,
-        items: [
-          { product: mockProducts[0], quantity: 1, line_price: 1999 },
-          { product: mockProducts[1], quantity: 1, line_price: 2499 }
-        ],
-        total_price: 4498,
-        currency: { iso_code: "USD" }
-      },
-      customer: null,
-      pages: [
-        { title: "About Us", handle: "about-us", url: "/pages/about-us" },
-        { title: "Contact", handle: "contact", url: "/pages/contact" },
-      ],
-      blogs: [
-        { title: "News", handle: "news", url: "/blogs/news" },
-      ],
-      articles: [],
-      linklists: mockMenus,
-      menus: mockMenus,
-      routes: {
-        root_url: "/",
-        cart_url: "/cart",
-        account_url: "/account",
-        account_login_url: "/account/login",
-        account_register_url: "/account/register",
-        search_url: "/search",
-        collections_url: "/collections",
-        all_products_collection_url: "/collections/all",
-      },
-      canonical_url: "/",
-      page_description: "Welcome to our store",
-      handle: "index",
-      // Images global
-      images: {
-        logo: { src: "https://via.placeholder.com/200x60?text=Logo" },
-        placeholder: { src: "https://via.placeholder.com/400x400?text=Image" },
-      },
-      // Powered by URL
-      powered_by_link: '<a href="https://www.shopify.com" target="_blank">Powered by Shopify</a>',
-    };
-  }
-
-  private getMockProducts(): any[] {
-    const placeholderImg = "https://via.placeholder.com/400x400?text=Product";
-    return [
-      {
-        id: 1001,
-        title: "Sample Product 1",
-        handle: "sample-product-1",
-        url: "/products/sample-product-1",
-        price: 1999,
-        price_min: 1999,
-        price_max: 2499,
-        compare_at_price: 2499,
-        compare_at_price_min: 2499,
-        compare_at_price_max: 2499,
-        available: true,
-        featured_image: { src: placeholderImg, alt: "Sample Product 1" },
-        images: [{ src: placeholderImg, alt: "Sample Product 1" }],
-        image: { src: placeholderImg, alt: "Sample Product 1" },
-        variants: [
-          { id: 1, title: "Default", price: 1999, available: true, inventory_quantity: 10 }
-        ],
-        selected_or_first_available_variant: { id: 1, title: "Default", price: 1999, available: true },
-        description: "This is a sample product for preview purposes.",
-        vendor: "Sample Vendor",
-        type: "Sample Type",
-        tags: ["sample", "preview"],
-        options: [],
-        has_only_default_variant: true,
-      },
-      {
-        id: 1002,
-        title: "Sample Product 2",
-        handle: "sample-product-2",
-        url: "/products/sample-product-2",
-        price: 2499,
-        price_min: 2499,
-        price_max: 2499,
-        compare_at_price: 3499,
-        compare_at_price_min: 3499,
-        available: true,
-        featured_image: { src: placeholderImg, alt: "Sample Product 2" },
-        images: [{ src: placeholderImg, alt: "Sample Product 2" }],
-        image: { src: placeholderImg, alt: "Sample Product 2" },
-        variants: [
-          { id: 2, title: "Default", price: 2499, available: true, inventory_quantity: 5 }
-        ],
-        selected_or_first_available_variant: { id: 2, title: "Default", price: 2499, available: true },
-        description: "Another sample product.",
-        vendor: "Sample Vendor",
-        type: "Sample Type",
-        tags: ["sample"],
-        options: [],
-        has_only_default_variant: true,
-      },
-      {
-        id: 1003,
-        title: "Sample Product 3",
-        handle: "sample-product-3",
-        url: "/products/sample-product-3",
-        price: 3999,
-        price_min: 3999,
-        price_max: 3999,
-        compare_at_price: null,
-        available: true,
-        featured_image: { src: placeholderImg, alt: "Sample Product 3" },
-        images: [{ src: placeholderImg, alt: "Sample Product 3" }],
-        image: { src: placeholderImg, alt: "Sample Product 3" },
-        variants: [
-          { id: 3, title: "Default", price: 3999, available: true, inventory_quantity: 15 }
-        ],
-        selected_or_first_available_variant: { id: 3, title: "Default", price: 3999, available: true },
-        description: "Premium sample product.",
-        vendor: "Premium Vendor",
-        type: "Premium Type",
-        tags: ["premium"],
-        options: [],
-        has_only_default_variant: true,
-      },
-      {
-        id: 1004,
-        title: "Sample Product 4",
-        handle: "sample-product-4",
-        url: "/products/sample-product-4",
-        price: 4999,
-        price_min: 4999,
-        price_max: 4999,
-        compare_at_price: 5999,
-        available: false,
-        featured_image: { src: placeholderImg, alt: "Sample Product 4" },
-        images: [{ src: placeholderImg, alt: "Sample Product 4" }],
-        image: { src: placeholderImg, alt: "Sample Product 4" },
-        variants: [
-          { id: 4, title: "Default", price: 4999, available: false, inventory_quantity: 0 }
-        ],
-        selected_or_first_available_variant: { id: 4, title: "Default", price: 4999, available: false },
-        description: "Out of stock sample.",
-        vendor: "Sample Vendor",
-        type: "Sample Type",
-        tags: ["sold-out"],
-        options: [],
-        has_only_default_variant: true,
-      },
-    ];
-  }
-
-  private getMockCollections(): any[] {
-    const placeholderImg = "https://via.placeholder.com/600x400?text=Collection";
-    const products = this.getMockProducts();
-
-    return [
-      {
-        id: 2001,
-        title: "All Products",
-        handle: "all",
-        url: "/collections/all",
-        description: "Browse all our products",
-        image: { src: placeholderImg, alt: "All Products" },
-        featured_image: { src: placeholderImg, alt: "All Products" },
-        products: products,
-        products_count: products.length,
-        all_products_count: products.length,
-      },
-      {
-        id: 2002,
-        title: "Featured",
-        handle: "featured",
-        url: "/collections/featured",
-        description: "Our featured products",
-        image: { src: placeholderImg, alt: "Featured" },
-        featured_image: { src: placeholderImg, alt: "Featured" },
-        products: products.slice(0, 2),
-        products_count: 2,
-        all_products_count: 2,
-      },
-      {
-        id: 2003,
-        title: "New Arrivals",
-        handle: "new-arrivals",
-        url: "/collections/new-arrivals",
-        description: "Check out our latest products",
-        image: { src: placeholderImg, alt: "New Arrivals" },
-        featured_image: { src: placeholderImg, alt: "New Arrivals" },
-        products: products.slice(1, 3),
-        products_count: 2,
-        all_products_count: 2,
-      },
-    ];
-  }
-
-  private getMockMenus(): Record<string, any> {
-    return {
-      "main-menu": {
-        title: "Main Menu",
-        handle: "main-menu",
-        links: [
-          { title: "Home", url: "/", active: true },
-          { title: "Catalog", url: "/collections/all", active: false },
-          { title: "About Us", url: "/pages/about-us", active: false },
-          { title: "Contact", url: "/pages/contact", active: false },
-        ],
-      },
-      "footer-menu": {
-        title: "Footer Menu",
-        handle: "footer-menu",
-        links: [
-          { title: "Search", url: "/search", active: false },
-          { title: "Privacy Policy", url: "/policies/privacy-policy", active: false },
-          { title: "Refund Policy", url: "/policies/refund-policy", active: false },
-        ],
-      },
-    };
-  }
-
-  private arrayToHandle(items: any[]): Record<string, any> {
-    const result: Record<string, any> = {};
-    for (const item of items) {
-      if (item.handle) {
-        result[item.handle] = item;
-      }
-    }
-    return result;
+      content_for_header: '',
+      content_for_layout: '',
+    } as RenderContext & Record<string, any>;
   }
 
   private getContentForHeader(context: RenderContext): string {
@@ -2228,36 +2654,8 @@ export class ShopifyLiquidEngine {
   }
 
   private generateCSSVariables(settings: Record<string, any>): string {
-    const vars: string[] = [];
-
-    for (const [key, value] of Object.entries(settings)) {
-      if (value === null || value === undefined) continue;
-
-      // Color settings
-      if (typeof value === 'string') {
-        if (value.startsWith('#') || value.startsWith('rgb') || value.startsWith('hsl')) {
-          vars.push(`--color-${key.replace(/_/g, '-')}: ${value};`);
-        }
-      }
-
-      // Color objects from Shopify (e.g., {red: 255, green: 0, blue: 0, alpha: 1})
-      if (typeof value === 'object' && value.red !== undefined) {
-        const rgba = `rgba(${value.red}, ${value.green}, ${value.blue}, ${value.alpha ?? 1})`;
-        vars.push(`--color-${key.replace(/_/g, '-')}: ${rgba};`);
-      }
-
-      // Font settings
-      if (key.includes('font') && typeof value === 'string') {
-        vars.push(`--font-${key.replace(/_/g, '-')}: ${value};`);
-      }
-
-      // Numeric settings (spacing, etc)
-      if (typeof value === 'number') {
-        vars.push(`--${key.replace(/_/g, '-')}: ${value}px;`);
-      }
-    }
-
-    return vars.join('\n          ');
+    // Use the comprehensive CSS variable generator from cssVariables.server.ts
+    return generateCSSVars(settings, { includeDefaults: true });
   }
 
   private getAssetCSSLinks(): string {
@@ -2289,31 +2687,25 @@ export class ShopifyLiquidEngine {
   }
 
   private getGoogleFontsLink(settings: Record<string, any>): string {
-    // Extract font families from settings
-    const fonts: Set<string> = new Set();
+    // Use cssVariables.server.ts utilities for font parsing
+    const fonts = [];
 
     for (const [key, value] of Object.entries(settings)) {
       if (key.includes('font') && typeof value === 'string') {
-        // Parse Shopify font format (e.g., "roboto_n4" or "Roboto")
-        const fontName = value.split('_')[0].replace(/([A-Z])/g, ' $1').trim();
-        if (fontName && fontName.length > 0) {
-          fonts.add(fontName);
-        }
+        fonts.push(parseShopifyFont(value));
       }
     }
 
-    // Default fonts if none specified
-    if (fonts.size === 0) {
-      fonts.add('Inter');
+    if (fonts.length === 0) {
+      // Default font
+      fonts.push({ family: 'Inter', weight: 400, style: 'normal' as const });
     }
 
-    const fontFamilies = Array.from(fonts)
-      .map(f => f.replace(/ /g, '+'))
-      .join('|');
+    const fontsUrl = generateGoogleFontsUrl(fonts);
 
     return `<link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-      <link href="https://fonts.googleapis.com/css2?family=${fontFamilies}:wght@400;500;600;700&display=swap" rel="stylesheet">`;
+      <link href="${fontsUrl}" rel="stylesheet">`;
   }
 
   private loadThemeSettings(): Record<string, any> {

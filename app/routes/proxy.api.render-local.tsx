@@ -7,6 +7,7 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import * as fs from "fs";
 import * as path from "path";
 import { authenticate } from "../shopify.server";
+import { getMinimalEditorScript } from "../utils/editorBridge";
 import { createShopifyLiquidEngine } from "../utils/liquidEngine.server";
 
 const THEMES_DIR = process.env.THEMES_DIR || path.join(process.cwd(), "themes");
@@ -98,62 +99,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       </style>
     `;
 
-    // Inject editor communication script
-    const editorScript = `
-      <script>
-        window.VSBuilder = {
-          ready: false,
-          init: function() {
-            this.ready = true;
-            window.parent.postMessage({ type: 'vsbuilder:ready' }, '*');
-          },
-          highlightSection: function(sectionId) {
-            const el = document.getElementById('shopify-section-' + sectionId);
-            if (el) {
-              el.style.outline = '2px solid #5c5cf0';
-              el.style.outlineOffset = '-2px';
-            }
-          },
-          clearHighlight: function(sectionId) {
-            const el = document.getElementById('shopify-section-' + sectionId);
-            if (el) {
-              el.style.outline = 'none';
-            }
-          }
-        };
-
-        document.addEventListener('click', function(e) {
-          const link = e.target.closest('a');
-          if (link && link.href) {
-            e.preventDefault();
-            window.parent.postMessage({
-              type: 'vsbuilder:navigate',
-              url: link.href
-            }, '*');
-          }
-        });
-
-        window.addEventListener('message', function(e) {
-          if (e.data.type === 'vsbuilder:highlight') {
-            VSBuilder.highlightSection(e.data.sectionId);
-          }
-          if (e.data.type === 'vsbuilder:clearHighlight') {
-            VSBuilder.clearHighlight(e.data.sectionId);
-          }
-          if (e.data.type === 'vsbuilder:reload') {
-            location.reload();
-          }
-        });
-
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', function() {
-            VSBuilder.init();
-          });
-        } else {
-          VSBuilder.init();
-        }
-      </script>
-    `;
+    // Get editor communication script from shared module
+    const editorScript = getMinimalEditorScript();
 
     // Inject base URL for assets - use relative proxy route
     // This goes through Shopify proxy (/apps/vsbuilder/...) -> our backend (/proxy/...)
