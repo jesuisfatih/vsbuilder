@@ -975,6 +975,142 @@ export class ShopifyLiquidEngine {
         }
       },
     });
+
+    // {% form 'type' %} ... {% endform %}
+    this.engine.registerTag("form", {
+      parse(tagToken: any, remainTokens: any[]) {
+        this.formType = tagToken.args.replace(/['"]/g, "").trim() || "contact";
+        this.formContent = "";
+        let token;
+        let depth = 1;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "form") depth++;
+          if (token.name === "endform") {
+            depth--;
+            if (depth === 0) break;
+          }
+          this.formContent += token.raw || token.getText?.() || "";
+        }
+      },
+      async render(scope: any) {
+        const formType = this.formType;
+        const action = formType === "contact" ? "/contact" :
+                       formType === "customer_login" ? "/account/login" :
+                       formType === "create_customer" ? "/account/register" :
+                       formType === "recover_customer_password" ? "/account/recover" :
+                       formType === "product" ? "/cart/add" :
+                       formType === "cart" ? "/cart" : "/";
+
+        const content = await self.engine.parseAndRender(this.formContent, scope.getAll());
+        return `<form method="post" action="${action}" accept-charset="UTF-8" class="shopify-form shopify-form-${formType}">
+          <input type="hidden" name="form_type" value="${formType}">
+          ${content}
+        </form>`;
+      },
+    });
+
+    // {% paginate %} ... {% endpaginate %}
+    this.engine.registerTag("paginate", {
+      parse(tagToken: any, remainTokens: any[]) {
+        this.paginateArgs = tagToken.args;
+        this.paginateContent = "";
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "endpaginate") break;
+          this.paginateContent += token.raw || token.getText?.() || "";
+        }
+      },
+      async render(scope: any) {
+        const parentContext = scope.getAll();
+        // Create a mock paginate object
+        const paginate = {
+          current_page: 1,
+          current_offset: 0,
+          items: 12,
+          parts: [],
+          pages: 1,
+          previous: null,
+          next: null,
+          page_size: 12,
+        };
+
+        const content = await self.engine.parseAndRender(this.paginateContent, {
+          ...parentContext,
+          paginate,
+        });
+        return content;
+      },
+    });
+
+    // {% style %} ... {% endstyle %}
+    this.engine.registerTag("style", {
+      parse(tagToken: any, remainTokens: any[]) {
+        this.styleContent = "";
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "endstyle") break;
+          this.styleContent += token.raw || token.getText?.() || "";
+        }
+      },
+      async render(scope: any) {
+        const content = await self.engine.parseAndRender(this.styleContent, scope.getAll());
+        return `<style>${content}</style>`;
+      },
+    });
+
+    // {% layout 'none' %} or {% layout 'alternate' %}
+    this.engine.registerTag("layout", {
+      parse(tagToken: any) {
+        this.layoutName = tagToken.args.replace(/['"]/g, "").trim();
+      },
+      render() {
+        // Layout is handled at a higher level, just return empty
+        return "";
+      },
+    });
+
+    // {% content_for 'header' %} - Shopify content blocks
+    this.engine.registerTag("content_for", {
+      parse(tagToken: any, remainTokens: any[]) {
+        this.contentName = tagToken.args.replace(/['"]/g, "").trim();
+        this.contentBody = "";
+        let token;
+        while ((token = remainTokens.shift())) {
+          if (token.name === "endcontent_for") break;
+          this.contentBody += token.raw || token.getText?.() || "";
+        }
+      },
+      render() {
+        // content_for captures content, doesn't output
+        return "";
+      },
+    });
+
+    // {% increment var %} - Creates a counter
+    this.engine.registerTag("increment", {
+      parse(tagToken: any) {
+        this.varName = tagToken.args.trim();
+      },
+      render(scope: any) {
+        const ctx = scope.getAll();
+        const current = ctx[`__increment_${this.varName}`] || 0;
+        scope.set(`__increment_${this.varName}`, current + 1);
+        return String(current);
+      },
+    });
+
+    // {% decrement var %} - Creates a decrementing counter
+    this.engine.registerTag("decrement", {
+      parse(tagToken: any) {
+        this.varName = tagToken.args.trim();
+      },
+      render(scope: any) {
+        const ctx = scope.getAll();
+        const current = ctx[`__decrement_${this.varName}`] ?? -1;
+        scope.set(`__decrement_${this.varName}`, current - 1);
+        return String(current);
+      },
+    });
   }
 
   // ============================================
@@ -2485,6 +2621,213 @@ export class ShopifyLiquidEngine {
     this.engine.registerFilter("customer_register_link", (text: string) => {
       return `<a href="/account/register">${text || "Create account"}</a>`;
     });
+
+    // ============================================
+    // MEDIA FILTERS (NEW)
+    // ============================================
+
+    // media_tag - render media (image, video, model)
+    this.engine.registerFilter("media_tag", (media: any, size?: string) => {
+      if (!media) return "";
+      const mediaType = media.media_type || "image";
+      const src = media.src || media.url || media.preview_image?.src || "";
+      const alt = media.alt || "";
+
+      if (mediaType === "video" || mediaType === "external_video") {
+        return `<video src="${src}" controls></video>`;
+      } else if (mediaType === "model") {
+        return `<model-viewer src="${src}" alt="${alt}"></model-viewer>`;
+      }
+      return `<img src="${src}" alt="${alt}" loading="lazy">`;
+    });
+
+    // external_video_tag - embed external video
+    this.engine.registerFilter("external_video_tag", (media: any) => {
+      if (!media) return "";
+      const type = media.host || "youtube";
+      const id = media.external_id || "";
+      if (type === "youtube") {
+        return `<iframe src="https://www.youtube.com/embed/${id}" frameborder="0" allowfullscreen></iframe>`;
+      } else if (type === "vimeo") {
+        return `<iframe src="https://player.vimeo.com/video/${id}" frameborder="0" allowfullscreen></iframe>`;
+      }
+      return "";
+    });
+
+    // video_tag - render native Shopify video
+    this.engine.registerFilter("video_tag", (video: any, options?: any) => {
+      if (!video) return "";
+      const src = video.sources?.[0]?.url || video.src || "";
+      const poster = video.preview_image?.src || "";
+      return `<video src="${src}" poster="${poster}" controls playsinline></video>`;
+    });
+
+    // model_viewer_tag - render 3D model
+    this.engine.registerFilter("model_viewer_tag", (model: any) => {
+      if (!model) return "";
+      const src = model.sources?.[0]?.url || "";
+      return `<model-viewer src="${src}" auto-rotate camera-controls></model-viewer>`;
+    });
+
+    // ============================================
+    // METAFIELD FILTERS (NEW)
+    // ============================================
+
+    // metafield_tag - render metafield value appropriately
+    this.engine.registerFilter("metafield_tag", (metafield: any) => {
+      if (!metafield) return "";
+      const value = metafield.value || metafield;
+      const type = metafield.type || "single_line_text_field";
+
+      if (type === "rich_text_field") {
+        return value; // Already HTML
+      } else if (type === "file_reference") {
+        return `<img src="${value}" loading="lazy">`;
+      } else if (type === "url") {
+        return `<a href="${value}">${value}</a>`;
+      }
+      return String(value);
+    });
+
+    // metafield_text - get metafield text value
+    this.engine.registerFilter("metafield_text", (metafield: any) => {
+      if (!metafield) return "";
+      return metafield.value || String(metafield);
+    });
+
+    // ============================================
+    // URL FILTERS (NEW)
+    // ============================================
+
+    // payment_type_img_url - payment icon URL
+    this.engine.registerFilter("payment_type_img_url", (type: string) => {
+      const validTypes = ["visa", "mastercard", "amex", "discover", "paypal", "apple_pay", "google_pay", "shopify_pay"];
+      if (!validTypes.includes(type?.toLowerCase())) return "";
+      return `https://cdn.shopify.com/shopifycloud/shopify/assets/payment_icons/${type.toLowerCase()}.svg`;
+    });
+
+    // payment_type_svg_tag - payment icon SVG tag
+    this.engine.registerFilter("payment_type_svg_tag", (type: string) => {
+      return `<img src="https://cdn.shopify.com/shopifycloud/shopify/assets/payment_icons/${type?.toLowerCase()}.svg" alt="${type}" class="payment-icon" width="38" height="24">`;
+    });
+
+    // placeholder_svg_tag - placeholder SVG
+    this.engine.registerFilter("placeholder_svg_tag", (name: string, cssClass?: string) => {
+      const cls = cssClass || "placeholder-svg";
+      const placeholders: Record<string, string> = {
+        "image": '<svg class="' + cls + '" viewBox="0 0 525 525"><rect fill="#ddd" width="525" height="525"/><text fill="#999" x="50%" y="50%" dy=".1em" text-anchor="middle" font-size="48">Image</text></svg>',
+        "product-1": '<svg class="' + cls + '" viewBox="0 0 525 525"><rect fill="#ddd" width="525" height="525"/><text fill="#999" x="50%" y="50%" dy=".1em" text-anchor="middle" font-size="48">Product</text></svg>',
+        "collection-1": '<svg class="' + cls + '" viewBox="0 0 525 525"><rect fill="#ddd" width="525" height="525"/><text fill="#999" x="50%" y="50%" dy=".1em" text-anchor="middle" font-size="48">Collection</text></svg>',
+      };
+      return placeholders[name] || placeholders["image"];
+    });
+
+    // ============================================
+    // ADVANCED TRANSLATION (NEW)
+    // ============================================
+
+    // translate alias for t
+    this.engine.registerFilter("translate", (key: string, ...args: any[]) => {
+      return this.getTranslation(key, "en") || key;
+    });
+
+    // t filter with pluralization support
+    this.engine.registerFilter("t", (key: string, ...args: any[]) => {
+      let translation = this.getTranslation(key, "en");
+      if (!translation) return key.split('.').pop() || key;
+
+      // Handle variable substitution {{ count }}
+      if (args.length > 0 && typeof args[0] === 'object') {
+        const vars = args[0];
+        for (const [varKey, varValue] of Object.entries(vars)) {
+          translation = translation.replace(new RegExp(`{{\\s*${varKey}\\s*}}`, 'g'), String(varValue));
+        }
+      }
+      return translation;
+    });
+
+    // ============================================
+    // ADDITIONAL UTILITY FILTERS (NEW)
+    // ============================================
+
+    // default_pagination - pagination with defaults
+    this.engine.registerFilter("default_pagination", (paginate: any) => {
+      if (!paginate) return "";
+      return `<nav class="pagination">
+        ${paginate.previous ? `<a href="${paginate.previous.url}" class="prev">Previous</a>` : ""}
+        <span class="current">${paginate.current_page} / ${paginate.pages}</span>
+        ${paginate.next ? `<a href="${paginate.next.url}" class="next">Next</a>` : ""}
+      </nav>`;
+    });
+
+    // format_address - format address object
+    this.engine.registerFilter("format_address", (address: any) => {
+      if (!address) return "";
+      const parts = [
+        address.address1,
+        address.address2,
+        address.city,
+        address.province_code || address.province,
+        address.zip,
+        address.country
+      ].filter(Boolean);
+      return parts.join(", ");
+    });
+
+    // sort_natural - natural sort for strings/numbers
+    this.engine.registerFilter("sort_natural", (arr: any[], property?: string) => {
+      if (!Array.isArray(arr)) return arr;
+      const sorted = [...arr];
+      return sorted.sort((a, b) => {
+        const valA = property ? a?.[property] : a;
+        const valB = property ? b?.[property] : b;
+        return String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' });
+      });
+    });
+
+    // sha256 - hash string
+    this.engine.registerFilter("sha256", (str: string) => {
+      if (typeof str !== "string") return "";
+      return createHash("sha256").update(str).digest("hex");
+    });
+
+    // hmac_sha256 - HMAC hash
+    this.engine.registerFilter("hmac_sha256", (str: string, secret: string) => {
+      if (typeof str !== "string") return "";
+      return createHmac("sha256", secret || "").update(str).digest("hex");
+    });
+
+    // base64_encode
+    this.engine.registerFilter("base64_encode", (str: string) => {
+      if (typeof str !== "string") return "";
+      return Buffer.from(str).toString("base64");
+    });
+
+    // base64_decode
+    this.engine.registerFilter("base64_decode", (str: string) => {
+      if (typeof str !== "string") return "";
+      try {
+        return Buffer.from(str, "base64").toString("utf-8");
+      } catch {
+        return "";
+      }
+    });
+
+    // base64_url_safe_encode
+    this.engine.registerFilter("base64_url_safe_encode", (str: string) => {
+      if (typeof str !== "string") return "";
+      return Buffer.from(str).toString("base64url");
+    });
+
+    // base64_url_safe_decode
+    this.engine.registerFilter("base64_url_safe_decode", (str: string) => {
+      if (typeof str !== "string") return "";
+      try {
+        return Buffer.from(str, "base64url").toString("utf-8");
+      } catch {
+        return "";
+      }
+    });
   }
 
   // ============================================
@@ -2502,58 +2845,103 @@ export class ShopifyLiquidEngine {
     }
 
     if (!fs.existsSync(sectionPath)) {
+      console.warn(`[RenderSection] Section not found: ${safeType}`);
       return `<!-- Section not found: ${safeType} -->`;
     }
 
     // Read section file content
-    const sectionContent = fs.readFileSync(sectionPath, "utf-8");
+    let sectionContent: string;
+    try {
+      sectionContent = fs.readFileSync(sectionPath, "utf-8");
+    } catch (error) {
+      console.error(`[RenderSection] Failed to read section ${safeType}:`, error);
+      return `<!-- Section read error: ${safeType} -->`;
+    }
 
     // Extract schema from section file
     const schemaMatch = sectionContent.match(/{%[\s\S]*?schema[\s\S]*?%}([\s\S]*?){%[\s\S]*?endschema[\s\S]*?%}/);
 
-    let sectionSchema: any = {};
+    let sectionSchema: any = { settings: [], blocks: [] };
+    let schemaSettings: any[] = [];
+    let blockSchemas: Record<string, any[]> = {};
+
     if (schemaMatch) {
       try {
         sectionSchema = JSON.parse(schemaMatch[1]);
-        this.sectionSchemas.set(sectionType, sectionSchema.settings || []);
+        schemaSettings = sectionSchema.settings || [];
+        this.sectionSchemas.set(sectionType, schemaSettings);
+
+        // Build block schema lookup
+        if (Array.isArray(sectionSchema.blocks)) {
+          for (const blockDef of sectionSchema.blocks) {
+            if (blockDef.type && Array.isArray(blockDef.settings)) {
+              blockSchemas[blockDef.type] = blockDef.settings;
+            }
+          }
+        }
       } catch (e) {
-        console.error(`Failed to parse schema for ${sectionType}:`, e);
+        console.error(`[RenderSection] Failed to parse schema for ${safeType}:`, e);
       }
     }
 
-    // Build section context
-    const sectionSettings = context.section?.settings || this.getDefaultSettings(sectionSchema.settings || []);
+    // Build section settings with defaults
+    const defaultSettings = this.getDefaultSettings(schemaSettings);
+    const sectionSettings = { ...defaultSettings, ...(context.section?.settings || {}) };
+
     const sectionBlocks = context.section?.blocks || {};
     const blockOrder = context.section?.block_order || Object.keys(sectionBlocks);
 
-    // Build blocks array in correct order for iteration
-    const blocksArray = blockOrder.map((blockId: string) => {
+    // Build blocks array with defaults from block schemas
+    const blocksArray = blockOrder.map((blockId: string, index: number) => {
       const block = sectionBlocks[blockId];
       if (!block) return null;
+
+      // Get default settings for this block type
+      const blockType = block.type;
+      const blockDefaultSettings = blockSchemas[blockType]
+        ? this.getDefaultSettings(blockSchemas[blockType])
+        : {};
+
       return {
         id: blockId,
-        type: block.type,
-        settings: block.settings || {},
+        type: blockType,
+        settings: { ...blockDefaultSettings, ...(block.settings || {}) },
+        shopify_attributes: `data-block-id="${blockId}" data-block-type="${blockType}"`,
       };
     }).filter(Boolean);
 
+    // Build comprehensive section context
     const sectionContext = {
       ...context,
       section: {
-        id: context.section?.id || `section-${sectionType}`,
+        id: context.section?.id || `section-${sectionType}-${Date.now()}`,
         type: sectionType,
         settings: sectionSettings,
         blocks: blocksArray,
         block_order: blockOrder,
+        index: context.section?.index ?? 0,
+        location: context.section?.location || "template",
       },
       block: null,
+      // forloop helper for sections in templates
+      forloop: context.forloop || { first: true, last: true, index: 1, index0: 0, length: 1, rindex: 1, rindex0: 0 },
     };
 
     try {
       let html = await this.engine.parseAndRender(sectionContent, sectionContext);
-      return this.cleanupUnrenderedLiquid(html);
+      html = this.cleanupUnrenderedLiquid(html);
+      return html;
     } catch (error) {
-      console.error(`Error rendering section ${sectionType}:`, error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[RenderSection] Error rendering section ${sectionType}:`, errorMessage);
+
+      // Try to give a helpful error message in dev mode
+      if (context.request?.design_mode) {
+        return `<div class="section-error" style="padding:20px;background:#fee;border:2px solid #f66;margin:10px;border-radius:8px;">
+          <h3 style="margin:0 0 10px 0;color:#c00;">⚠️ Section Error: ${sectionType}</h3>
+          <code style="font-size:12px;color:#666;">${errorMessage.substring(0, 200)}</code>
+        </div>`;
+      }
       return `<!-- Section Render Error: ${sectionType} -->`;
     }
   }
@@ -2614,25 +3002,25 @@ export class ShopifyLiquidEngine {
    * These occur when section settings don't have values set
    */
   private cleanupUnrenderedLiquid(html: string): string {
-    // Remove src/href attributes that still contain Liquid syntax
-    // e.g., src="{{ fallback_image_url }}" -> src=""
-    html = html.replace(/(src|href|poster)=["']\s*\{\{[^}]+\}\}\s*["']/gi, '$1=""');
+    // 1. Remove src/href/srcset attributes that contain Liquid syntax
+    html = html.replace(/(src|href|poster|srcset)=["'][^"']*\{\{[^}]+\}\}[^"']*["']/gi, '$1=""');
 
-    // Replace any remaining {{ ... }} with placeholder text (not in attributes)
-    // This prevents broken URLs but keeps structure intact
-    html = html.replace(/\{\{\s*[^}]*\s*\}\}/g, (match) => {
-      // Keep translation keys visible for debugging
-      if (match.includes("'t:") || match.includes("| t")) {
-        return ""; // Empty for translation failures
-      }
-      return ""; // Empty string for other unrendered variables
-    });
+    // 2. Remove src/href that look like Liquid variable paths (section.settings.*, block.*, etc.)
+    // These happen when Liquid fails to resolve but doesn't include {{ }}
+    html = html.replace(/(src|href)=["']([^"']*(?:section\.settings\.|block\.|block_|\.featured_media|\.preview_image)[^"']*)["']/gi, '$1=""');
 
-    // Remove {% ... %} tags that weren't processed
-    html = html.replace(/\{%[^%]*%\}/g, "");
+    // 3. Clean url() in CSS that contain Liquid
+    html = html.replace(/url\([^)]*\{\{[^}]+\}\}[^)]*\)/gi, 'url()');
 
-    // NOTE: Don't remove empty src images - some themes use lazy loading
-    // html = html.replace(/<img[^>]*src=["']\s*["'][^>]*>/gi, '');
+    // 4. Replace any remaining {{ ... }} with empty string
+    html = html.replace(/\{\{[^}]*\}\}/g, '');
+
+    // 5. Remove {% ... %} tags that weren't processed
+    html = html.replace(/\{%[^%]*%\}/g, '');
+
+    // 6. Replace empty src with transparent placeholder (prevents 404)
+    const transparentGif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    html = html.replace(/src=["']\s*["']/g, `src="${transparentGif}"`);
 
     return html;
   }
