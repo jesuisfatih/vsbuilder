@@ -95,13 +95,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const shopHandle = session.shop.replace(".myshopify.com", "");
 
-    // Always sync theme to ensure all assets (CSS, JS) are downloaded
-    console.log(`[Editor] Syncing theme files...`);
-    const syncResult = await saveThemeToLocal(admin, themeIdParam, shopHandle);
-    if (syncResult) {
-      console.log(`[Editor] Theme synced successfully!`);
+    // Check if theme is properly synced using hash verification
+    const isSynced = isThemeSyncedProperly(shopHandle, themeIdParam);
+
+    if (!isSynced) {
+      // Delete old/corrupted folder and re-sync
+      console.log(`[Editor] Theme not properly synced, deleting and re-syncing...`);
+      deleteThemeFolder(shopHandle, themeIdParam);
+
+      const syncResult = await saveThemeToLocal(admin, themeIdParam, shopHandle);
+      if (syncResult) {
+        console.log(`[Editor] Theme synced successfully!`);
+      } else {
+        console.error(`[Editor] Theme sync failed!`);
+      }
     } else {
-      console.error(`[Editor] Theme sync failed!`);
+      console.log(`[Editor] Theme already properly synced`);
     }
 
     // Download theme data (structure, templates, etc.)

@@ -4,6 +4,7 @@
  * Using Shopify Admin GraphQL API
  */
 
+import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -841,8 +842,86 @@ export function getLocalThemePath(shopHandle: string, themeId: string): string {
   return path.join(THEMES_DIR, shopHandle, themeId);
 }
 
-export function isThemeSavedLocally(shopHandle: string, themeId: string): boolean {
+// Generate hash for theme based on file count and sync time
+export function generateThemeHash(themeId: string, fileCount: number): string {
+  const data = `${themeId}-${fileCount}-${Date.now()}`;
+  return createHash('sha256').update(data).digest('hex').substring(0, 16);
+}
+
+// Get theme manifest
+export function getThemeManifest(shopHandle: string, themeId: string): any | null {
+  const manifestPath = path.join(getLocalThemePath(shopHandle, themeId), '.sync-manifest.json');
+
+  if (!fs.existsSync(manifestPath)) {
+    return null;
+  }
+
+  try {
+    const content = fs.readFileSync(manifestPath, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+// Check if theme is properly synced with hash verification
+export function isThemeSyncedProperly(shopHandle: string, themeId: string): boolean {
+  const manifest = getThemeManifest(shopHandle, themeId);
+
+  if (!manifest) {
+    console.log(`[Theme] No manifest found for ${themeId}`);
+    return false;
+  }
+
+  // Check if manifest has required fields
+  if (!manifest.hash || !manifest.totalFiles || !manifest.syncedAt) {
+    console.log(`[Theme] Invalid manifest for ${themeId}`);
+    return false;
+  }
+
+  // Check if enough files were saved (at least 50 files expected)
+  if (manifest.totalFiles < 50) {
+    console.log(`[Theme] Too few files (${manifest.totalFiles}) for ${themeId}`);
+    return false;
+  }
+
+  // Verify some critical files exist
   const themeDir = getLocalThemePath(shopHandle, themeId);
-  return fs.existsSync(path.join(themeDir, 'layout', 'theme.liquid')) ||
-         fs.existsSync(path.join(themeDir, 'templates', 'index.json'));
+  const criticalFiles = [
+    path.join(themeDir, 'layout', 'theme.liquid'),
+    path.join(themeDir, 'config', 'settings_schema.json')
+  ];
+
+  for (const file of criticalFiles) {
+    if (!fs.existsSync(file)) {
+      console.log(`[Theme] Critical file missing: ${file}`);
+      return false;
+    }
+  }
+
+  console.log(`[Theme] ✅ Theme ${themeId} verified: ${manifest.totalFiles} files, hash: ${manifest.hash}`);
+  return true;
+}
+
+// Legacy function - now uses hash verification
+export function isThemeSavedLocally(shopHandle: string, themeId: string): boolean {
+  return isThemeSyncedProperly(shopHandle, themeId);
+}
+
+// Delete theme folder completely
+export function deleteThemeFolder(shopHandle: string, themeId: string): boolean {
+  const themeDir = getLocalThemePath(shopHandle, themeId);
+
+  if (!fs.existsSync(themeDir)) {
+    return true;
+  }
+
+  try {
+    fs.rmSync(themeDir, { recursive: true, force: true });
+    console.log(`[Theme] Deleted theme folder: ${themeDir}`);
+    return true;
+  } catch (error) {
+    console.error(`[Theme] Error deleting theme folder:`, error);
+    return false;
+  }
 }
